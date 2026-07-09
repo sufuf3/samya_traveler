@@ -25,6 +25,17 @@
       font-family: inherit;
     }
     textarea { min-height: 7rem; resize: vertical; }
+    select {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 0.6rem;
+      margin-top: 0.35rem;
+      border-radius: 8px;
+      border: 1px solid #999;
+      font-size: 1rem;
+      font-family: inherit;
+      background: transparent;
+    }
     button {
       margin-top: 1.4rem;
       padding: 0.7rem 1.6rem;
@@ -52,10 +63,16 @@
   <p class="hint">套用固定的品牌人設與輸出規則（見 prompts/system_prompt.md），只要換目的地素材即可重複產出。</p>
 
   <form method="post">
+    <label for="mode">模式</label>
+    <select id="mode" name="mode">
+      <option value="ideation" {% if mode == "ideation" %}selected{% endif %}>從零發想腳本（Hook／分鏡表／文案 SEO）</option>
+      <option value="edit" {% if mode == "edit" %}selected{% endif %}>剪輯導演模式（已有素材，剪成成片）</option>
+    </select>
+
     <label for="destination">目的地／主題名稱</label>
     <input type="text" id="destination" name="destination" value="{{ destination }}" placeholder="例如：清境農場 - 雲海旅宿" required>
 
-    <label for="material">素材／踩點資訊（景點特色、氛圍感旅宿、交通方式等，越具體越好）</label>
+    <label for="material">素材（發想模式：景點特色、氛圍感旅宿、交通方式；剪輯模式：貼上已擁有的素材清單，例如「素材1：...\n素材2：...」）</label>
     <textarea id="material" name="material" placeholder="例如：入住雲夢仙境的樹屋房型，清晨可見雲海，建議自駕上山避開遊覽車人潮...">{{ material }}</textarea>
 
     <label for="style_notes">本次額外備註（選填）</label>

@@ -13,7 +13,7 @@ from pathlib import Path
 from flask import Flask, render_template, request
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-from lib.generator import DEFAULT_MODEL, GenerationRequest, generate_script
+from lib.generator import DEFAULT_MODE, DEFAULT_MODEL, GenerationRequest, generate_script
 
 app = Flask(__name__)
 
@@ -22,12 +22,13 @@ app = Flask(__name__)
 def index():
     result = None
     error = None
-    form_values = {"destination": "", "material": "", "style_notes": ""}
+    form_values = {"destination": "", "material": "", "style_notes": "", "mode": DEFAULT_MODE}
 
     if request.method == "POST":
         form_values["destination"] = request.form.get("destination", "").strip()
         form_values["material"] = request.form.get("material", "").strip()
         form_values["style_notes"] = request.form.get("style_notes", "").strip()
+        form_values["mode"] = request.form.get("mode", DEFAULT_MODE)
 
         if not form_values["destination"]:
             error = "請輸入目的地／主題名稱。"
@@ -38,6 +39,7 @@ def index():
                     material=form_values["material"],
                     style_notes=form_values["style_notes"],
                     model=DEFAULT_MODEL,
+                    mode=form_values["mode"],
                 )
                 result = generate_script(req)
             except Exception as exc:  # noqa: BLE001 - 直接把錯誤顯示給使用者
