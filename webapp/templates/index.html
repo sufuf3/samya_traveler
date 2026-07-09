@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <title>樂天小熊Samya 🧸｜Reels 腳本產生器</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body {
+      font-family: "Noto Sans TC", -apple-system, BlinkMacSystemFont, sans-serif;
+      max-width: 860px;
+      margin: 2.5rem auto;
+      padding: 0 1.25rem;
+      line-height: 1.6;
+    }
+    h1 { font-size: 1.4rem; }
+    label { display: block; font-weight: 600; margin-top: 1.1rem; }
+    input[type=text], textarea {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 0.6rem;
+      margin-top: 0.35rem;
+      border-radius: 8px;
+      border: 1px solid #999;
+      font-size: 1rem;
+      font-family: inherit;
+    }
+    textarea { min-height: 7rem; resize: vertical; }
+    button {
+      margin-top: 1.4rem;
+      padding: 0.7rem 1.6rem;
+      border: none;
+      border-radius: 999px;
+      background: #b5654a;
+      color: #fff;
+      font-size: 1rem;
+      cursor: pointer;
+    }
+    button:hover { background: #9c5440; }
+    .error { color: #c0392b; font-weight: 600; margin-top: 1rem; }
+    .result {
+      margin-top: 2rem;
+      padding: 1.2rem;
+      border-radius: 10px;
+      background: rgba(127,127,127,0.08);
+      white-space: pre-wrap;
+    }
+    .hint { font-size: 0.85rem; opacity: 0.7; }
+  </style>
+</head>
+<body>
+  <h1>樂天小熊Samya 🧸｜高質感慢旅 Reels 腳本產生器</h1>
+  <p class="hint">套用固定的品牌人設與輸出規則（見 prompts/system_prompt.md），只要換目的地素材即可重複產出。</p>
+
+  <form method="post">
+    <label for="destination">目的地／主題名稱</label>
+    <input type="text" id="destination" name="destination" value="{{ destination }}" placeholder="例如：清境農場 - 雲海旅宿" required>
+
+    <label for="material">素材／踩點資訊（景點特色、氛圍感旅宿、交通方式等，越具體越好）</label>
+    <textarea id="material" name="material" placeholder="例如：入住雲夢仙境的樹屋房型，清晨可見雲海，建議自駕上山避開遊覽車人潮...">{{ material }}</textarea>
+
+    <label for="style_notes">本次額外備註（選填）</label>
+    <input type="text" id="style_notes" name="style_notes" value="{{ style_notes }}" placeholder="例如：這次想強調親子友善">
+
+    <button type="submit">產生腳本</button>
+  </form>
+
+  {% if error %}
+    <p class="error">⚠️ {{ error }}</p>
+  {% endif %}
+
+  {% if result %}
+    <div class="result">{{ result }}</div>
+  {% endif %}
+</body>
+</html>
