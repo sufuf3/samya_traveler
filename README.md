@@ -19,6 +19,12 @@ examples/                        範例輸出，示範系統會產出什麼格�
 outputs/                         CLI 產出的腳本預設存放處（已加入 .gitignore，不會進版控）
 ```
 
+## 旅遊部落格（Samya Traveler）
+
+`blog/` 是 Samya Traveler 旅遊部落格的完整 Hugo + PaperMod 網站原始碼，準備搬到
+`Samya-Traveler/Samya-Traveler.github.io`，並透過 GitHub Actions 部署到 GitHub Pages。
+建立 repo、設定 Pages、本機預覽與新增文章的步驟請見 [`blog/README.md`](blog/README.md)。
+
 ## 安裝
 
 ```bash
