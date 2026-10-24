@@ -4,26 +4,31 @@
     "FUNCTIONS_WORKER_RUNTIME": "node",
     "AzureWebJobsStorage": "UseDevelopmentStorage=true",
     "AZURE_STORAGE_CONNECTION_STRING": "UseDevelopmentStorage=true",
-    "AZURE_FOUNDRY_ENDPOINT": "https://<your-foundry-resource>.services.ai.azure.com/anthropic",
-    "AZURE_FOUNDRY_API_KEY": "<your-foundry-api-key>",
-    "CLAUDE_DEPLOYMENT_NAME": "claude-sonnet-5-5",
-    "CLAUDE_EFFORT": "low",
-    "CLAUDE_STRUCTURED_OUTPUT": "true",
-    "CLAUDE_TIMEOUT_MS": "120000",
+
+    "AZURE_OPENAI_ENDPOINT": "https://<your-aoai-resource>.openai.azure.com/",
+    "AZURE_OPENAI_API_KEY": "<your-azure-openai-key>",
+    "AZURE_OPENAI_DEPLOYMENT": "gpt-4.1",
+    "AZURE_OPENAI_API_VERSION": "2025-01-01-preview",
+    "AI_TIMEOUT_MS": "120000",
+
+    "GMAIL_USER": "littlebear.samya@gmail.com",
+    "GMAIL_APP_PASSWORD": "<16-char-google-app-password>",
+    "MAIL_FROM_NAME": "SlowMate 慢旅伴",
+    "MAIL_REPLY_TO": "",
+    "EMAIL_DAILY_CAP": "400",
+
     "DAILY_GLOBAL_LIMIT": "50",
     "ADMIN_EMAILS": "sufuf3149@gmail.com",
     "PORTALY_URL": "https://portaly.cc/samya_traveler",
-    "ALLOWED_ORIGINS": "https://samya-traveler.github.io,http://localhost:8080,http://127.0.0.1:8080",
-    "RESEND_API_KEY": "re_xxxxxxxxxxxxxxxx",
-    "RESEND_FROM": "SlowMate 慢旅秘書 <slowmate@your-verified-domain.com>",
-    "RESEND_REPLY_TO": "",
-    "EMAIL_DAILY_CAP": "95",
+    "ALLOWED_ORIGINS": "https://samya-traveler.github.io,http://localhost:1313,http://localhost:8080,http://127.0.0.1:8080",
+    "SLOWMATE_APP_URL": "https://samya-traveler.github.io/slowmate/",
+
     "OTP_SECRET": "<another-long-random-string-for-otp-hashing>",
     "OTP_MAX_SENDS_PER_DAY": "5",
     "DISPOSABLE_EXTRA_DOMAINS": "",
+
     "GENERATE_CODE_SECRET": "<long-random-string-shared-with-logic-app>",
-    "GENERATE_CODE_FUNCTION_KEY": "",
-    "SLOWMATE_APP_URL": "https://samya-traveler.github.io/slowmate/"
+    "GENERATE_CODE_FUNCTION_KEY": ""
   },
   "Host": {
     "CORS": "*"

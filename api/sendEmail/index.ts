@@ -1,7 +1,7 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions';
 import { BadRequestError, envInt, json, normalizeEmail, preflight, readJsonBody } from '../shared/http';
-import { escapeHtml, sendMail } from '../shared/mailer';
-import { decrementCounter, taipeiDateKey, tryIncrementCounter } from '../shared/storage';
+import { SLOW_TRAVEL_NOTE_BODY, SLOW_TRAVEL_NOTE_TITLE, escapeHtml, sendMail } from '../shared/mailer';
+import { EMAIL_COUNTER, decrementCounter, taipeiDateKey, tryIncrementCounter } from '../shared/storage';
 import { TripPlan, TripValidationError, googleMapsUrl, sanitizeTrip } from '../shared/trip';
 
 /**
@@ -10,11 +10,11 @@ import { TripPlan, TripValidationError, googleMapsUrl, sanitizeTrip } from '../s
  *
  * 防濫用：
  * - 同一收件人 60 秒內只能寄一次（單一執行個體記憶體節流，對應前端 60 秒鎖定）
- * - 全站每日寄信上限 EMAIL_DAILY_CAP（預設 95，配合 Resend 免費方案每日 100 封），記錄於 DailyUsage(PartitionKey='email')
+ * - 全站每日寄信上限 EMAIL_DAILY_CAP（預設 400，Gmail 個人帳號每日約 500 封），記錄於 DailyUsage(PartitionKey='EmailDaily')
  * - 行程內容一律經過 sanitizeTrip 清洗與 HTML 轉義
  */
 
-const COUNTER_KIND = 'email';
+const COUNTER_KIND = EMAIL_COUNTER;
 const RECIPIENT_COOLDOWN_MS = 60 * 1000;
 const recentRecipients = new Map<string, number>();
 
@@ -165,7 +165,7 @@ function renderHtml(trip: TripPlan): string {
         <tr><td style="padding:0 16px 16px;">
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:linear-gradient(180deg,#EAF1EC 0%,#FBF9F5 100%);background-color:#EAF1EC;border:1px solid ${C.border};border-radius:20px;">
             <tr><td align="center" style="padding:26px 20px;">
-              <div style="font-family:'Noto Serif TC',Georgia,serif;font-size:14px;letter-spacing:2px;color:${C.sageDark};font-weight:700;">SlowMate · AI Travel Planner</div>
+              <div style="font-family:'Noto Serif TC',Georgia,serif;font-size:14px;letter-spacing:2px;color:${C.sageDark};font-weight:700;">SlowMate 慢旅伴 · AI 慢旅行程規劃師</div>
               <div style="font-family:'Noto Serif TC',Georgia,serif;font-size:22px;font-weight:700;color:${C.text};margin:10px 0 8px;line-height:1.4;">${escapeHtml(s.theme_title)}</div>
               <div style="font-size:14px;color:${C.muted};line-height:1.7;">${escapeHtml(s.vibe_description)}</div>
             </td></tr>
@@ -175,10 +175,17 @@ function renderHtml(trip: TripPlan): string {
         ${section('🎫 推薦交通 Pass 與事前預約', passes + reservations)}
         ${section('🌿 每日慢旅時間軸', days)}
         ${section('☑️ 行前準備待辦清單', todos)}
+        <tr><td style="padding:0 16px 16px;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#F1F6F2;border:1px dashed #A9C4B3;border-radius:16px;">
+            <tr><td style="padding:16px 18px;font-size:13px;line-height:1.8;color:${C.text};">
+              <strong style="color:${C.sageDark};">${escapeHtml(SLOW_TRAVEL_NOTE_TITLE)}</strong><br>
+              ${escapeHtml(SLOW_TRAVEL_NOTE_BODY)}
+            </td></tr>
+          </table>
+        </td></tr>
         <tr><td align="center" style="padding:8px 16px 24px;font-size:12px;color:${C.muted};line-height:1.7;">
-          此行程由 AI 生成，票價、營業時間與預約規則請於出發前至官方網站再次確認。<br>
           Curated Slow Travel by <a href="https://samya-traveler.github.io/" style="color:${C.sageDark};text-decoration:none;font-weight:600;">@samya_traveler</a> ·
-          <a href="https://samya-traveler.github.io/slowmate/" style="color:${C.sageDark};text-decoration:none;font-weight:600;">SlowMate</a>
+          <a href="https://samya-traveler.github.io/slowmate/" style="color:${C.sageDark};text-decoration:none;font-weight:600;">SlowMate 慢旅伴</a>
         </td></tr>
       </table>
     </td></tr>
@@ -225,7 +232,8 @@ function renderText(trip: TripPlan): string {
     prep.todo_checklist.forEach((t) => lines.push(`☐ ${t}`));
     lines.push('');
   }
-  lines.push('— SlowMate AI Travel Planner · https://samya-traveler.github.io/slowmate/');
+  lines.push(SLOW_TRAVEL_NOTE_TITLE, SLOW_TRAVEL_NOTE_BODY, '');
+  lines.push('— SlowMate 慢旅伴｜AI 慢旅行程規劃師 · https://samya-traveler.github.io/slowmate/');
   return lines.join('\n');
 }
 
@@ -261,7 +269,7 @@ export async function sendEmail(request: HttpRequest, context: InvocationContext
     }
 
     const dateKey = taipeiDateKey();
-    const quota = await tryIncrementCounter(COUNTER_KIND, dateKey, envInt('EMAIL_DAILY_CAP', 95));
+    const quota = await tryIncrementCounter(COUNTER_KIND, dateKey, envInt('EMAIL_DAILY_CAP', 400));
     if (!quota.ok) {
       return json(request, 429, {
         error: 'email_daily_cap',
@@ -290,7 +298,7 @@ export async function sendEmail(request: HttpRequest, context: InvocationContext
       } catch (rollbackErr) {
         context.error('[sendEmail] 寄信額度回滾失敗', rollbackErr);
       }
-      context.error('[sendEmail] Resend 寄信失敗', err);
+      context.error('[sendEmail] Gmail 寄信失敗', err);
       return json(request, 502, { error: 'email_failed', message: '寄信服務暫時忙碌，請先使用「複製純文字行程」保存。' });
     }
   } catch (err) {

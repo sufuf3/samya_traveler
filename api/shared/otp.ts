@@ -179,7 +179,7 @@ export function renderOtpEmail(code: string): { subject: string; html: string; t
   const text = `您的 SlowMate 慢旅規劃驗證碼為：【${code}】，10 分鐘內有效。
 
 若這不是您本人的操作，請直接忽略此信。
-— SlowMate AI Travel Planner · https://samya-traveler.github.io/slowmate/`;
+— SlowMate 慢旅伴｜AI 慢旅行程規劃師 · https://samya-traveler.github.io/slowmate/`;
   const html = `<!DOCTYPE html>
 <html lang="zh-TW"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
 <body style="margin:0;padding:0;background:#FBF9F5;font-family:'Noto Sans TC',-apple-system,BlinkMacSystemFont,'PingFang TC','Microsoft JhengHei',sans-serif;">
@@ -187,7 +187,7 @@ export function renderOtpEmail(code: string): { subject: string; html: string; t
     <tr><td align="center" style="padding:28px 16px;">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;background:#FFFFFF;border:1px solid #E6E1D6;border-radius:20px;">
         <tr><td style="padding:28px 24px;color:#2C3531;">
-          <div style="font-family:'Noto Serif TC',Georgia,serif;font-size:14px;letter-spacing:2px;color:#435E4F;font-weight:700;">SlowMate · AI Travel Planner</div>
+          <div style="font-family:'Noto Serif TC',Georgia,serif;font-size:14px;letter-spacing:2px;color:#435E4F;font-weight:700;">SlowMate 慢旅伴 · AI 慢旅行程規劃師</div>
           <h1 style="font-family:'Noto Serif TC',Georgia,serif;font-size:20px;margin:12px 0;">📩 驗證您的電子信箱</h1>
           <p style="font-size:14px;line-height:1.8;color:#6E7873;margin:0 0 18px;">您的 SlowMate 慢旅規劃驗證碼為：</p>
           <div style="text-align:center;background:#E6EFEA;border:1px dashed #5B7B6A;border-radius:14px;padding:18px 10px;font-family:'SFMono-Regular',Consolas,monospace;font-size:32px;font-weight:700;letter-spacing:10px;color:#435E4F;">${escapeHtml(code)}</div>

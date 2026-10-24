@@ -1,40 +1,38 @@
-# SlowMate API（Azure Functions · Node.js v4 · TypeScript）
+# SlowMate 慢旅伴 API（Azure Functions · Node.js v4 · TypeScript）
 
-SlowMate AI Travel Planner 的 Serverless 後端。前端是 `../slowmate/index.html`，部署在 GitHub Pages：
-`https://samya-traveler.github.io/slowmate/`。
+「SlowMate 慢旅伴｜AI 慢旅行程規劃師」的 Serverless 後端。前端是 `../slowmate/index.html`，
+放在 Hugo 部落格 repo 的 `static/slowmate/index.html`，公開網址 `https://samya-traveler.github.io/slowmate/`。
+
+- **AI**：Azure OpenAI Service `gpt-4.1`（Chat Completions + `response_format: json_object`）
+- **資料庫**：Azure Table Storage（4 張表，首次呼叫時自動建立）
+- **發信**：Gmail SMTP（Nodemailer，`smtp.gmail.com:465`），不需自訂網域
 
 | Function | Route | Auth | 用途 |
 |---|---|---|---|
 | `planTrip` | `GET /api/plan` | anonymous | 查今日（台灣時間）剩餘名額 `{ remaining_quota }` |
-| `planTrip` | `POST /api/plan` | anonymous | 白名單 → 資格（Email OTP 首次免費額度 / 序號）→ 每日 50 次 → Claude → 成功才核銷 |
+| `planTrip` | `POST /api/plan` | anonymous | 白名單 → 資格（Email OTP 首次免費額度 / 序號）→ 每日 50 次 → gpt-4.1 → 成功才核銷 |
 | `sendOtp` | `POST /api/send-otp` | anonymous | 首次免費額度的 6 位數 Email 驗證碼 |
 | `checkCode` | `POST /api/check-code` | anonymous | 唯讀查詢序號狀態（`valid` / `processing` / `used` / `not_found`），不鎖定也不核銷 |
-| `sendEmail` | `POST /api/send-email` | anonymous | 以 Resend 寄出 HTML 行程信 |
+| `sendEmail` | `POST /api/send-email` | anonymous | 以 Gmail 寄出 HTML 行程信 |
 | `generateCode` | `POST /api/generateCode`（舊路徑 `/api/generate-code` 仍可用） | 程式內驗證：`?code=` / `x-functions-key` / `x-slowmate-secret` 擇一 | 給 Logic App 產生 `SLOW-XXXX-YYYY` 序號 |
 
-## 資料表（Azure Table Storage，首次呼叫時自動建立）
+## 資料表
 
-- `DailyUsage`：PartitionKey `plan`（每日生成）/ `email`（每日寄信），RowKey 是台灣日期 `YYYY-MM-DD`，欄位 `usedCount`
-- `UserProfiles`：PartitionKey `user`，RowKey 是 `encodeURIComponent(email)`，欄位 `free_quota_used`、`email_verified_at`、`generation_count`…
-- `RedeemCodes`：PartitionKey `Code`，RowKey 是序號（前後端皆 `trim().toUpperCase()`），欄位 `is_used`、`status`（`unused` / `processing` / `used`）、`locked_at`、`sponsor_email`、`amount`、`tier`、`order_id`、`created_at`、`used_at`、`used_by_email`…
+| 表 | PartitionKey | RowKey | 主要欄位 |
+|---|---|---|---|
+| `DailyUsage` | `Daily`（每日成功生成）/ `EmailDaily`（每日寄信封數） | 台灣日期 `YYYY-MM-DD` | `usedCount` |
+| `UserProfiles` | `User` | 小寫 email | `free_quota_used`、`used_at`、`generation_count` |
+| `EmailOtps` | `OTP` | 小寫 email | `otp_hash`（不存明碼）、`expires_at`（10 分鐘）、`attempt_count`（最多 5 次）、`last_sent_at`（60 秒冷卻）、`send_day` / `send_count` |
+| `RedeemCodes` | `Code` | 序號（`trim().toUpperCase()`） | `is_used`、`status`（`unused` / `processing` / `used`）、`locked_at`、`sponsor_email`、`amount`、`tier`、`order_id`、`created_at`、`used_at` |
 
-## 序號狀態機（認碼不認信箱）
-
-序號不綁定 `sponsor_email`，任何信箱持有有效序號都能兌換，可轉贈旅伴。邏輯集中在 `shared/redeemCodes.ts`：
-
-1. `/api/plan` 收到序號 → 不存在或已使用回 400；`status = "processing"` 且 `locked_at` 未滿 3 分鐘回 409 `code_processing`。
-2. 預扣每日名額（額滿回 429，序號完全沒被動到）。
-3. 以 ETag 樂觀鎖把序號改為 `status = "processing"`、寫入 `locked_at`。雙開分頁同時送出時只有一個請求拿得到鎖，另一個回 409。
-4. 呼叫 Claude：成功回傳合法 JSON → `is_used = true`、`status = "used"`、寫入 `used_at`；失敗 → 回滾為 `is_used = false`、`status = "unused"`，並退回每日名額。
-5. 若 Function 在生成中途當掉沒能回滾，超過 3 分鐘的 `processing` 會被視為逾時，可以重新使用。
-- `EmailOtps`：PartitionKey `otp`，RowKey 是 `encodeURIComponent(email)`，欄位 `otp_hash`（不存明碼）、`expires_at`（10 分鐘）、`attempt_count`（最多 5 次）、`last_sent_at`（60 秒冷卻）、`send_day`/`send_count`（每信箱每日上限）
+Email 當 RowKey 時只會轉義 Table Storage 不允許的字元（`/ \ # ?`、控制字元與 `%`），一般信箱在 Portal 中可直接閱讀。
 
 ## 資格分流（POST /api/plan）
 
 | 情況 | 行為 |
 |---|---|
-| 管理員白名單 | 免 OTP、免序號、不扣每日名額 |
-| 只帶有效序號 | 免 OTP，直接核銷序號；若免費額度未用過，回傳 `free_quota_preserved: true` |
+| 管理員白名單 `sufuf3149@gmail.com` | 免 OTP、免序號、不扣每日名額 |
+| 只帶有效序號 | 免 OTP，直接核銷序號（認碼不認信箱）；若免費額度未用過，回傳 `free_quota_preserved: true` |
 | 帶 `otp_code` 且免費額度未用過 | 驗證 OTP → 使用免費額度；若同時帶有效序號，序號不核銷並回傳 `code_preserved: true` |
 | 免費額度已用過、沒有有效序號 | 402 `payment_required` |
 | 免費額度未用過、沒帶 OTP 也沒帶序號 | 403 `otp_required`（前端改呼叫 `/api/send-otp`） |
@@ -43,47 +41,66 @@ OTP 錯誤會回 400，`error` 為 `invalid_otp`（附 `attempts_left`）、`otp
 OTP 只有在行程「成功生成」後才作廢；AI 生成失敗時，10 分鐘內可用同一組驗證碼重試。
 
 `/api/send-otp` 會先擋拋棄式信箱（400 `disposable_email`，清單在 `shared/disposable.ts`，可用 `DISPOSABLE_EXTRA_DOMAINS` 追加）。
-若該信箱已用過免費額度，會直接回 402、不寄信；今日全站名額已滿時回 429、不寄信。驗證信與行程信共用 `EMAIL_DAILY_CAP`。
+若該信箱已用過免費額度，會直接回 402、不寄信；今日全站名額已滿時回 429、不寄信。
 
-所有計數與核銷都使用 ETag 樂觀鎖。POST `/api/plan` 的流程是：
+## 序號狀態機（零損耗回滾）
 
-1. 先預扣一席名額。
-2. 以 `lease_until` 暫時鎖住序號或免費資格，此時 `is_used` 仍為 `false`。
-3. 呼叫 Claude。
-4. 成功才寫入 `is_used: true`；失敗則釋放租約並退回名額，不會耗損資格。
+邏輯集中在 `shared/redeemCodes.ts`，所有寫入都帶 ETag 樂觀鎖：
 
-回應碼：
+1. 收到序號 → 不存在或已使用回 400；`status = "processing"` 且 `locked_at` 未滿 3 分鐘回 409 `code_processing`。
+2. 預扣每日名額（額滿回 429，序號完全沒被動到）。
+3. 把序號改為 `status = "processing"`、寫入 `locked_at`。雙開分頁同時送出時只有一個請求拿得到鎖，另一個回 409。
+4. 呼叫 gpt-4.1：成功回傳合法 JSON → `is_used = true`、`status = "used"`、寫入 `used_at`；失敗 → 回滾為 `is_used = false`、`status = "unused"`，並退回每日名額。
+5. 若 Function 在生成中途當掉沒能回滾，超過 3 分鐘的 `processing` 會被視為逾時，可以重新使用。
+
+免費額度走相同流程（`UserProfiles` 的租約），失敗時一樣不會被消耗。
+
+## 回應碼
 
 | 狀態碼 | 意義 |
 |---|---|
 | 200 | 成功 |
-| 400 | `invalid_input` 或 `invalid_code` |
+| 400 | `invalid_input`、`invalid_code`、OTP 錯誤、`disposable_email` |
 | 402 | `payment_required` |
-| 409 | 同一資格正在另一個視窗生成中 |
-| 429 | `token_limit_reached` |
-| 502 / 504 | AI 生成失敗（已全數回滾） |
+| 403 | `otp_required` |
+| 409 | 序號或免費額度正在另一個視窗生成中 |
+| 429 | `token_limit_reached`、`otp_cooldown`、`email_daily_cap` |
+| 502 / 504 | AI 生成或寄信失敗（已全數回滾） |
 
-## AI 模型
+## AI 模型：Azure OpenAI gpt-4.1
 
-透過 Azure AI Foundry 的 Anthropic Messages 端點（`https://<resource>.services.ai.azure.com/anthropic/v1/messages`），以 REST 呼叫：
+以 REST 呼叫 `POST {AZURE_OPENAI_ENDPOINT}/openai/deployments/{AZURE_OPENAI_DEPLOYMENT}/chat/completions?api-version={AZURE_OPENAI_API_VERSION}`：
 
-- 使用 `x-api-key` 與 `anthropic-version: 2023-06-01` 標頭。
-- 以 `output_config.format`（JSON Schema structured outputs）強制輸出合法 JSON。
-- 後端仍會清除 ```json 標籤，並以 `shared/trip.ts` 驗證與清洗結果。
+- `api-key` 標頭驗證，`response_format: { type: "json_object" }` 強制輸出合法 JSON。
+- `max_tokens`：1~5 天 8,000；6~14 天 14,000。`finish_reason` 為 `length` 或 `content_filter` 時視為失敗並回滾。
+- 遇到 429 / 5xx 會依 `retry-after` 重試 1 次（最多等 10 秒），總時間不超過 `AI_TIMEOUT_MS`。
+- System Prompt 採《Brutus》《&Premium》式的溫潤散文筆觸，並依 `start_date` 月份加入季節提示（冬季提早日落、夏季避開正午、春秋花季與楓季等，南半球目的地自動反轉季節），`todo_checklist` 會帶入對應的衣物裝備提醒。
+- 1~5 天每天 3 個時段（上午 / 下午 / 傍晚）；6~14 天每天 2 個時段（上午 / 下午），文字精簡避免 JSON 被截斷。
+- 回傳結果一律經 `shared/trip.ts` 驗證與清洗（天數與日期以後端計算為準、顏色只接受 HEX、`svg_theme` 只接受白名單）。
 
-> Claude 3.5 系列已全數退役，因此預設部署名稱為 `claude-sonnet-5-5`。請在 Foundry 部署 Claude 後，把 `CLAUDE_DEPLOYMENT_NAME` 設為你的部署名稱。
-> 若部署的模型不支援 `effort` 或 structured outputs，可將 `CLAUDE_EFFORT=none`、`CLAUDE_STRUCTURED_OUTPUT=false`。
+## 發信：Gmail SMTP
+
+1. 寄件帳號 `littlebear.samya@gmail.com` 需先開啟**兩步驟驗證**。
+2. 到 Google 帳戶 →「安全性」→「應用程式密碼」產生 16 碼密碼，設為 `GMAIL_APP_PASSWORD`（含空白貼上也可以，程式會自動去除）。
+3. 寄件人固定為 `"SlowMate 慢旅伴" <littlebear.samya@gmail.com>`。
+4. Gmail 個人帳號每日約可寄 500 封，`EMAIL_DAILY_CAP` 預設 400 封（驗證信與行程信合計）。
+
+負責的信件：6 位數 OTP 驗證碼信、HTML 行程表信（頁尾附「慢旅伴的小叮嚀」）、Portaly 贊助序號信（附 Magic Link）。
 
 ## 環境變數（Function App → 設定 → 環境變數）
 
-完整清單見 `local.settings.example.json`。必填項目：
+完整清單見 `local.settings.example.json`。
 
 | 變數 | 說明 |
 |---|---|
 | `AZURE_STORAGE_CONNECTION_STRING` | 可省略，省略時改用 `AzureWebJobsStorage` |
-| `AZURE_FOUNDRY_ENDPOINT`、`AZURE_FOUNDRY_API_KEY`、`CLAUDE_DEPLOYMENT_NAME` | Foundry 連線設定 |
-| `RESEND_API_KEY`、`RESEND_FROM` | `RESEND_FROM` 須為 Resend 已驗證網域 |
-| `GENERATE_CODE_SECRET` | 與 Logic App 共用的長隨機字串（也作為 OTP 雜湊的預設 pepper） |
+| `AZURE_OPENAI_ENDPOINT` | 例 `https://<resource>.openai.azure.com/` |
+| `AZURE_OPENAI_API_KEY` | Azure OpenAI 金鑰 |
+| `AZURE_OPENAI_DEPLOYMENT` | 預設 `gpt-4.1` |
+| `AZURE_OPENAI_API_VERSION` | 預設 `2025-01-01-preview` |
+| `GMAIL_USER` | 預設 `littlebear.samya@gmail.com` |
+| `GMAIL_APP_PASSWORD` | Google 應用程式密碼（必填，否則無法寄信） |
+| `GENERATE_CODE_SECRET` | 與 Logic App 共用的長隨機字串 |
 | `OTP_SECRET` | OTP 雜湊用的 pepper，建議另設一組長隨機字串 |
 | `ALLOWED_ORIGINS` | 預設 `https://samya-traveler.github.io` |
 
@@ -93,14 +110,14 @@ OTP 只有在行程「成功生成」後才作廢；AI 生成失敗時，10 分�
 |---|---|
 | `DAILY_GLOBAL_LIMIT` | 50 |
 | `ADMIN_EMAILS` | `sufuf3149@gmail.com` |
-| `EMAIL_DAILY_CAP` | 95（Resend 免費方案每日 100 封） |
-| `PORTALY_URL` | — |
-| `CLAUDE_EFFORT` | `low` |
-| `CLAUDE_TIMEOUT_MS` | 120000 |
-| `OTP_MAX_SENDS_PER_DAY` | 5（同一信箱每日最多寄送驗證碼次數） |
-| `DISPOSABLE_EXTRA_DOMAINS` | 空（逗號分隔的額外免洗網域） |
+| `EMAIL_DAILY_CAP` | 400 |
+| `AI_TIMEOUT_MS` | 120000 |
+| `MAIL_FROM_NAME` / `MAIL_REPLY_TO` | `SlowMate 慢旅伴` / 空 |
+| `OTP_MAX_SENDS_PER_DAY` | 5 |
+| `DISPOSABLE_EXTRA_DOMAINS` | 空 |
 | `GENERATE_CODE_FUNCTION_KEY` | 空（想沿用 Azure Function Key 時，把它的值貼在這裡） |
-| `SLOWMATE_APP_URL` | `https://samya-traveler.github.io/slowmate/`（序號信 Magic Link 的網址） |
+| `SLOWMATE_APP_URL` | `https://samya-traveler.github.io/slowmate/`（Magic Link 網址） |
+| `PORTALY_URL` | `https://portaly.cc/samya_traveler` |
 
 ## 本機開發與部署
 
@@ -112,13 +129,13 @@ npx azurite-table --inMemoryPersistence &             # 本機 Table Storage
 npm start                                             # = build + func start
 ```
 
-部署：`npm run build && func azure functionapp publish <your-function-app>`，需要 Node 20 以上與 Functions runtime v4。
+一鍵建置 Azure 資源（Storage、Function App、Azure OpenAI gpt-4.1）與部署：見 `deploy/setup-azure.sh`。
 
 部署後請完成以下設定：
 
-- **CORS**：在 Function App → API → CORS 加入 `https://samya-traveler.github.io`。
-- **前端**：把 `slowmate/index.html` 內的 `API_BASE_URL` 改成 `https://<your-function-app>.azurewebsites.net/api`。
-- **GitHub Pages**：將 `slowmate/` 資料夾複製到 `Samya-Traveler.github.io` repo 的根目錄。根目錄的 `index.html` 不需要更動。
+- **前端**：把 `slowmate/index.html` 內的 `API_BASE_URL` 改成 `https://<your-function-app>.azurewebsites.net/api`，
+  再把檔案放到 Hugo repo 的 `static/slowmate/index.html`。根目錄的部落格首頁不需要更動。
+- **CORS**：腳本已設定 `https://samya-traveler.github.io`；本機 Hugo 開發（`http://localhost:1313`）請另外加入。
 
 ## Logic App 串接 generateCode
 
@@ -133,16 +150,16 @@ Portaly 贊助採「隨喜三階支持」：NT$ 88（輕量解鎖）/ 150（標�
   - Header `x-slowmate-secret: <金鑰>`
 
   金鑰需等於 App Setting 的 `GENERATE_CODE_SECRET` 或 `GENERATE_CODE_FUNCTION_KEY`；兩者都沒設定時一律拒絕。
-  此端點已改為 `anonymous` 並在程式內驗證，因為 Azure 平台層的 Function Key 檢查無法做到「擇一」。程式讀不到平台產生的 Function Key，要沿用它請把值貼到 `GENERATE_CODE_FUNCTION_KEY`。
+  此端點為 `anonymous` 並在程式內驗證，因為 Azure 平台層的 Function Key 檢查無法做到「擇一」。程式讀不到平台產生的 Function Key，要沿用它請把值貼到 `GENERATE_CODE_FUNCTION_KEY`。
 - **Body**：
 
   ```json
-  { "sponsor_email": "<從信件解析>", "sponsor_name": "...", "amount": 150, "currency": "TWD", "order_id": "<訂單編號>" }
+  { "sponsor_email": "<從信件解析>", "sponsor_name": "...", "amount": 150, "order_id": "<訂單編號>" }
   ```
 
 函式行為：
 
 - **重複贊助**：同一位贊助者第 2、3 次贊助時，只要 `order_id` 不同或沒提供，每次都會產生全新序號。只有傳入完全相同的 `order_id` 才會回傳同一組序號（`idempotent: true`），`portaly_order_id` 也接受為別名。
 - **發信權責**：
-  - 有 `RESEND_API_KEY`、有 `sponsor_email`、且 `notify !== false` → 由 Function 寄出序號信，回應 `delivery: "function"`。信中附一鍵帶入連結 `https://samya-traveler.github.io/slowmate/?code=SLOW-XXXX-YYYY`。
+  - 已設定 `GMAIL_APP_PASSWORD`、有 `sponsor_email`、且 `notify !== false` → 由 Function 以 Gmail 寄出序號信，回應 `delivery: "function"`。信中附一鍵帶入連結 `https://samya-traveler.github.io/slowmate/?code=SLOW-XXXX-YYYY`。
   - 否則只回傳序號 JSON，回應 `delivery: "logic_app"`，由 Logic App 自行寄出。回應中的 `magic_link` 可以直接放進 Logic App 的信件內容。

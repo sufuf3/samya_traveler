@@ -2,7 +2,7 @@ import { randomInt, timingSafeEqual } from 'node:crypto';
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions';
 import { odata } from '@azure/data-tables';
 import { BadRequestError, json, normalizeEmail, readJsonBody } from '../shared/http';
-import { escapeHtml, sendMail } from '../shared/mailer';
+import { escapeHtml, isMailerConfigured, sendMail } from '../shared/mailer';
 import { RedeemCodeEntity } from '../shared/redeemCodes';
 import { CODE_PK, TABLES, getTable, statusOf } from '../shared/storage';
 
@@ -35,7 +35,7 @@ import { CODE_PK, TABLES, getTable, statusOf } from '../shared/storage';
  * 冪等：只有傳入相同且非空的 order_id 才回傳同一組序號；否則每次呼叫都產生全新序號（支援同一信箱多次贊助）。
  *
  * 發信權責：
- *   - 有 RESEND_API_KEY、有 sponsor_email、且 notify !== false → 由本 Function 寄出序號信（delivery: 'function'），
+ *   - 已設定 GMAIL_APP_PASSWORD、有 sponsor_email、且 notify !== false → 由本 Function 以 Gmail 寄出序號信（delivery: 'function'），
  *     信中附一鍵帶入連結 https://samya-traveler.github.io/slowmate/?code=SLOW-XXXX-YYYY
  *   - 否則只回傳序號與 magic_link，由 Logic App 自行寄出（delivery: 'logic_app'）
  *
@@ -230,8 +230,8 @@ export async function generateCode(request: HttpRequest, context: InvocationCont
     }
     if (!code) throw new Error('序號連續碰撞，無法產生');
 
-    // 發信權責：有 Resend 金鑰、有收件人且未指定 notify:false → Function 寄；否則交給 Logic App
-    const functionSends = !!sponsorEmail && notify && !!process.env.RESEND_API_KEY;
+    // 發信權責：已設定 Gmail 應用程式密碼、有收件人且未指定 notify:false → Function 寄；否則交給 Logic App
+    const functionSends = !!sponsorEmail && notify && isMailerConfigured();
     let emailSent = false;
     let emailError: string | undefined;
     if (functionSends) {

@@ -6,7 +6,7 @@ import { CODE_PK, TABLES, getEntityOrNull, getTable, statusOf } from './storage'
  *
  *   unused ──lockCode()──▶ processing ──markCodeUsed()──▶ used
  *     ▲                        │
- *     └──────unlockCode()──────┘   （每日額滿 / Claude 失敗時回滾）
+ *     └──────unlockCode()──────┘   （每日額滿 / AI 生成失敗時回滾）
  *
  * - status = "processing" 且 locked_at 未滿 3 分鐘：視為生成中，其他請求回 409
  * - status = "processing" 但已超過 3 分鐘：視為逾時（例如 Function 中途當掉），可重新鎖定使用
@@ -67,7 +67,7 @@ export async function inspectCode(code: string): Promise<CodeState> {
 
 export type LockResult = { status: 'ok'; lockId: string } | { status: Exclude<CodeState, 'unused'> };
 
-/** 呼叫 Claude 前：unused → processing（ETag 樂觀鎖）。 */
+/** 呼叫 AI 前：unused → processing（ETag 樂觀鎖）。 */
 export async function lockCode(code: string): Promise<LockResult> {
   const table = await getTable(TABLES.RedeemCodes);
   for (let attempt = 0; attempt < 5; attempt++) {
@@ -91,7 +91,7 @@ export async function lockCode(code: string): Promise<LockResult> {
   return { status: 'processing' };
 }
 
-/** Claude 成功回傳合法 JSON 後：processing → used。 */
+/** AI 成功回傳合法 JSON 後：processing → used。 */
 export async function markCodeUsed(code: string, extra: Record<string, unknown>): Promise<void> {
   const table = await getTable(TABLES.RedeemCodes);
   for (let attempt = 0; attempt < 8; attempt++) {

@@ -4,6 +4,8 @@ import { BadRequestError, envInt, isAdminEmail, json, normalizeEmail, preflight,
 import { sendMail } from '../shared/mailer';
 import { OTP_RESEND_COOLDOWN_MS, OTP_TTL_MS, issueOtp, renderOtpEmail, rollbackIssuedOtp } from '../shared/otp';
 import {
+  EMAIL_COUNTER,
+  PLAN_COUNTER,
   PROFILE_PK,
   TABLES,
   decrementCounter,
@@ -26,7 +28,7 @@ import {
  *   429 { error: 'otp_cooldown', retry_after }          60 秒內已寄過
  *   429 { error: 'otp_daily_limit' }                    同一信箱今日寄送次數已達上限
  *   429 { error: 'token_limit_reached' }                今日全站 50 個名額已滿（不浪費驗證信）
- *   429 { error: 'email_daily_cap' }                    今日 Resend 寄信額度已滿
+ *   429 { error: 'email_daily_cap' }                    今日 Gmail 寄信額度已滿
  *   502 { error: 'email_failed' }                       寄信失敗（已回復冷卻，可立即重試）
  */
 
@@ -62,7 +64,7 @@ export async function sendOtp(request: HttpRequest, context: InvocationContext):
     // 今日全站名額已滿就不寄驗證信，避免浪費使用者時間與寄信額度
     const limit = envInt('DAILY_GLOBAL_LIMIT', 50);
     const dateKey = taipeiDateKey();
-    if ((await readCounter('plan', dateKey)) >= limit) {
+    if ((await readCounter(PLAN_COUNTER, dateKey)) >= limit) {
       return json(request, 429, {
         error: 'token_limit_reached',
         message: '感謝熱情支持！今日 50 個慢旅名額已滿，明日請早 🌿',
@@ -86,8 +88,8 @@ export async function sendOtp(request: HttpRequest, context: InvocationContext):
       });
     }
 
-    // 驗證信與行程信共用 Resend 每日寄信額度
-    const quota = await tryIncrementCounter('email', dateKey, envInt('EMAIL_DAILY_CAP', 95));
+    // 驗證信、行程信與序號信共用 Gmail 每日寄信額度
+    const quota = await tryIncrementCounter(EMAIL_COUNTER, dateKey, envInt('EMAIL_DAILY_CAP', 400));
     if (!quota.ok) {
       await rollbackIssuedOtp(email, issued.previous);
       return json(request, 429, {
@@ -102,7 +104,7 @@ export async function sendOtp(request: HttpRequest, context: InvocationContext):
     } catch (err) {
       context.error('[sendOtp] 驗證信寄送失敗', err);
       await rollbackIssuedOtp(email, issued.previous);
-      await decrementCounter('email', dateKey).catch((e) => context.error('[sendOtp] 寄信額度回滾失敗', e));
+      await decrementCounter(EMAIL_COUNTER, dateKey).catch((e) => context.error('[sendOtp] 寄信額度回滾失敗', e));
       return json(request, 502, { error: 'email_failed', message: '驗證信寄送失敗，請稍後再試一次。' });
     }
 

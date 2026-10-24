@@ -4,10 +4,10 @@ import { TableClient } from '@azure/data-tables';
 /**
  * Azure Table Storage 存取層。
  *
- * - DailyUsage   : PartitionKey = 計數器類型（'plan' 每日生成、'email' 每日寄信），RowKey = 台灣日期 YYYY-MM-DD，欄位 usedCount
- * - UserProfiles : PartitionKey = 'user'，RowKey = encodeURIComponent(email)，記錄免費試用與生成次數
- * - RedeemCodes  : PartitionKey = 'Code'，RowKey = 序號（SLOW-XXXX-YYYY），欄位 is_used 等
- * - EmailOtps    : PartitionKey = 'otp'，RowKey = encodeURIComponent(email)，首次免費額度的 Email 驗證碼
+ * - DailyUsage   : PartitionKey = 'Daily'（全站每日成功生成次數）/ 'EmailDaily'（每日寄信封數），RowKey = 台灣日期 YYYY-MM-DD，欄位 usedCount
+ * - UserProfiles : PartitionKey = 'User'，RowKey = email（小寫），記錄 free_quota_used、used_at
+ * - RedeemCodes  : PartitionKey = 'Code'，RowKey = 序號（SLOW-XXXX-YYYY），欄位 is_used / status 等
+ * - EmailOtps    : PartitionKey = 'OTP'，RowKey = email（小寫），首次免費額度的 Email 驗證碼
  *
  * 所有「讀 → 判斷 → 寫」都使用 ETag 樂觀鎖，避免高併發時超賣名額或重複核銷序號。
  */
@@ -19,9 +19,13 @@ export const TABLES = {
 } as const;
 export type TableName = (typeof TABLES)[keyof typeof TABLES];
 
-export const PROFILE_PK = 'user';
+export const PROFILE_PK = 'User';
 export const CODE_PK = 'Code';
-export const OTP_PK = 'otp';
+export const OTP_PK = 'OTP';
+
+/** DailyUsage 的 PartitionKey */
+export const PLAN_COUNTER = 'Daily';
+export const EMAIL_COUNTER = 'EmailDaily';
 
 const clients = new Map<TableName, TableClient>();
 const ensured = new Set<TableName>();
@@ -164,7 +168,7 @@ export async function decrementCounter(kind: string, dateKey: string): Promise<n
 /* ------------------------------------------------------------------ */
 /* 一次性資格租約（序號 / 免費試用）                                        */
 /*                                                                      */
-/* is_used 只在 Claude 成功後才變成 true；生成期間以 lease_until 暫時鎖住，   */
+/* is_used 只在 AI 生成成功後才變成 true；生成期間以 lease_until 暫時鎖住，   */
 /* 防止同一組序號被兩個分頁同時拿去生成。失敗時釋放租約，資格完全不損耗。       */
 /* ------------------------------------------------------------------ */
 
@@ -273,8 +277,12 @@ export async function releaseLease(tableName: TableName, pk: string, rk: string,
 }
 
 export function emailRowKey(email: string): string {
-  // RowKey 不允許 / \ # ? 與控制字元，encodeURIComponent 會把它們轉義
-  return encodeURIComponent(email.trim().toLowerCase());
+  // RowKey 直接使用小寫 email；只把 Table Storage 不允許的字元（/ \ # ? 與控制字元）以及 % 轉義，
+  // 一般信箱（例如 user@gmail.com）在 Portal 中可直接閱讀
+  return email
+    .trim()
+    .toLowerCase()
+    .replace(/[\/\\#?%\u0000-\u001F\u007F-\u009F]/g, (c) => encodeURIComponent(c));
 }
 
 /** UserProfiles 的 RowKey（與 EmailOtps 共用同一種編碼） */

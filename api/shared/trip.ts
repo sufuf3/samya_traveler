@@ -1,6 +1,6 @@
 /**
  * 前後端共用的 AI 行程 Data Contract。
- * planTrip 用它約束 Claude 輸出並驗證結果；sendEmail 用它清洗前端送來的行程。
+ * planTrip 用它驗證 Azure OpenAI 的輸出；sendEmail 用它清洗前端送來的行程。
  */
 
 export const SVG_THEMES = ['kyoto', 'tokyo', 'nature_mountain', 'ocean_beach', 'default_train'] as const;
@@ -51,114 +51,6 @@ export interface TripPlan {
 
 export const MAX_TRIP_DAYS = 14;
 
-/** 給 Claude structured outputs（output_config.format）使用的 JSON Schema。 */
-export const TRIP_JSON_SCHEMA = {
-  type: 'object',
-  additionalProperties: false,
-  required: ['trip_summary', 'pre_trip_prep', 'daily_itinerary'],
-  properties: {
-    trip_summary: {
-      type: 'object',
-      additionalProperties: false,
-      required: ['destination', 'theme_title', 'vibe_description', 'svg_theme', 'flight_card'],
-      properties: {
-        destination: { type: 'string' },
-        theme_title: { type: 'string' },
-        vibe_description: { type: 'string' },
-        svg_theme: { type: 'string', enum: [...SVG_THEMES] },
-        flight_card: {
-          type: 'object',
-          additionalProperties: false,
-          required: ['outbound_hint', 'inbound_hint'],
-          properties: {
-            outbound_hint: { type: 'string' },
-            inbound_hint: { type: 'string' }
-          }
-        }
-      }
-    },
-    pre_trip_prep: {
-      type: 'object',
-      additionalProperties: false,
-      required: ['transport_passes', 'advance_reservations', 'todo_checklist'],
-      properties: {
-        transport_passes: {
-          type: 'array',
-          items: {
-            type: 'object',
-            additionalProperties: false,
-            required: ['name', 'description', 'buy_timing'],
-            properties: {
-              name: { type: 'string' },
-              description: { type: 'string' },
-              buy_timing: { type: 'string' }
-            }
-          }
-        },
-        advance_reservations: {
-          type: 'array',
-          items: {
-            type: 'object',
-            additionalProperties: false,
-            required: ['target', 'deadline_note', 'tips'],
-            properties: {
-              target: { type: 'string' },
-              deadline_note: { type: 'string' },
-              tips: { type: 'string' }
-            }
-          }
-        },
-        todo_checklist: { type: 'array', items: { type: 'string' } }
-      }
-    },
-    daily_itinerary: {
-      type: 'array',
-      items: {
-        type: 'object',
-        additionalProperties: false,
-        required: ['day_index', 'date', 'day_title', 'timeline', 'stay_info'],
-        properties: {
-          day_index: { type: 'integer' },
-          date: { type: 'string', format: 'date' },
-          day_title: { type: 'string' },
-          timeline: {
-            type: 'array',
-            items: {
-              type: 'object',
-              additionalProperties: false,
-              required: ['time_slot', 'title', 'is_must_visit', 'transport_tag', 'description'],
-              properties: {
-                time_slot: { type: 'string', enum: ['上午', '下午', '傍晚'] },
-                title: { type: 'string' },
-                is_must_visit: { type: 'boolean' },
-                transport_tag: {
-                  type: 'object',
-                  additionalProperties: false,
-                  required: ['type', 'color_code'],
-                  properties: {
-                    type: { type: 'string' },
-                    color_code: { type: 'string' }
-                  }
-                },
-                description: { type: 'string' }
-              }
-            }
-          },
-          stay_info: {
-            type: 'object',
-            additionalProperties: false,
-            required: ['area_recommendation', 'hotel_vibe'],
-            properties: {
-              area_recommendation: { type: 'string' },
-              hotel_vibe: { type: 'string' }
-            }
-          }
-        }
-      }
-    }
-  }
-} as const;
-
 export class TripValidationError extends Error {}
 
 const HEX_COLOR_RE = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
@@ -180,7 +72,7 @@ function arr(v: unknown, max: number): unknown[] {
 }
 
 export interface SanitizeOptions {
-  /** 嚴格模式：用於驗證 Claude 輸出，天數必須完全符合 */
+  /** 嚴格模式：用於驗證 AI 輸出，天數必須完全符合 */
   expectedDates?: string[];
   /** 寬鬆模式：用於寄信 */
   lenient?: boolean;

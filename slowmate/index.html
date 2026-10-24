@@ -80,8 +80,8 @@
       top: 0;
       z-index: 100;
       background: rgba(251, 249, 245, 0.82);
-      backdrop-filter: blur(10px);
-      -webkit-backdrop-filter: blur(10px);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
       border-bottom: 1px solid var(--border-soft);
       padding: 10px 16px;
       width: 100%;
@@ -139,9 +139,8 @@
     }
 
     .brand-subtitle {
-      font-size: 0.7rem;
-      letter-spacing: 0.14em;
-      text-transform: uppercase;
+      font-size: 0.72rem;
+      letter-spacing: 0.12em;
       color: var(--text-muted);
       margin-top: 2px;
     }
@@ -448,6 +447,37 @@
       color: var(--brand-sage-dark);
       margin-top: 6px;
       font-weight: 500;
+    }
+
+    /* 慢旅風格快捷標籤 */
+    .vibe-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 10px;
+    }
+
+    .vibe-chip {
+      font-family: inherit;
+      font-size: 0.8rem;
+      font-weight: 500;
+      color: var(--text-main);
+      background: var(--bg-cream);
+      border: 1px solid var(--border-soft);
+      border-radius: 99px;
+      padding: 5px 11px;
+      cursor: pointer;
+      transition: background 0.2s, border-color 0.2s, color 0.2s, transform 0.1s;
+    }
+
+    .vibe-chip:hover { border-color: var(--brand-sage); }
+    .vibe-chip:active { transform: scale(0.97); }
+
+    .vibe-chip[aria-pressed="true"] {
+      background: var(--brand-sage-light);
+      border-color: var(--brand-sage);
+      color: var(--brand-sage-dark);
+      font-weight: 600;
     }
 
     .error-msg {
@@ -1029,6 +1059,33 @@
       color: var(--text-muted);
     }
 
+    .print-btn {
+      width: 100%;
+      margin-top: 10px;
+    }
+
+    .slow-note {
+      margin-top: 20px;
+      background: #F1F6F2;
+      border: 1px dashed #A9C4B3;
+      border-radius: var(--radius-md);
+      padding: 14px 16px;
+      font-size: 0.86rem;
+      line-height: 1.75;
+      color: var(--text-main);
+    }
+
+    .slow-note strong { color: var(--brand-sage-dark); }
+    .slow-note p { margin-top: 4px; }
+
+    .print-only { display: none; }
+
+    .print-day + .print-day {
+      margin-top: 18px;
+      padding-top: 14px;
+      border-top: 1px dashed var(--border-soft);
+    }
+
     .disclaimer {
       font-size: 0.75rem;
       color: var(--text-muted);
@@ -1119,6 +1176,37 @@
       border-radius: var(--radius-md);
       margin-bottom: 18px;
       box-shadow: 0 4px 12px rgba(224, 122, 95, 0.3);
+    }
+
+    .tier-list {
+      list-style: none;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      margin: -6px 0 14px;
+    }
+
+    .tier {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+      padding: 10px 4px;
+      border-radius: var(--radius-md);
+      background: #FFF6E9;
+      border: 1px solid #F2D7A9;
+      text-align: center;
+    }
+
+    .tier-price {
+      font-weight: 700;
+      color: #8A4A1C;
+      font-size: 0.95rem;
+    }
+
+    .tier-name {
+      font-size: 0.75rem;
+      color: var(--text-muted);
     }
 
     .modal-footnote {
@@ -1260,6 +1348,37 @@
       .entry-actions { grid-template-columns: 1fr; }
     }
 
+    /* ========== 列印 / 另存 PDF：乾淨的行程手冊 ========== */
+    @media print {
+      @page { margin: 14mm 12mm; }
+      html, body { background: #fff !important; }
+      body { display: block; font-size: 11pt; color: #222; }
+      .navbar, .quota-badge-bar, .restore-banner, #formView, .action-bar,
+      #resetPlanBtn, .print-btn, .modal-backdrop, .toast, footer,
+      .screen-only, .countdown-badge, .result-notice {
+        display: none !important;
+      }
+      .print-only { display: block !important; }
+      .container { max-width: none; padding: 0; }
+      .hero-card { background: none; border: none; padding: 0 0 8px; margin-bottom: 12px; }
+      .svg-illustration-box { height: 90px; margin-bottom: 6px; }
+      .card, .slow-note {
+        box-shadow: none !important;
+        border: 1px solid #ccc;
+        break-inside: avoid;
+        page-break-inside: avoid;
+      }
+      #printAllDays { break-inside: auto; page-break-inside: auto; }
+      .print-day, .timeline-node { break-inside: avoid; page-break-inside: avoid; }
+      .transport-tag, .must-visit-tag, .timeline-dot, .prep-badge {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+      .map-link { display: none; }
+      a { color: inherit; text-decoration: none; }
+      *, ::before, ::after { animation: none !important; transition: none !important; }
+    }
+
     /* ========== 無障礙支援：減少動態效果 ========== */
     @media (prefers-reduced-motion: reduce) {
       html { scroll-behavior: auto; }
@@ -1284,9 +1403,9 @@
   <!-- 頂部固定選單 -->
   <header class="navbar">
     <div class="navbar-inner">
-      <a href="./" class="brand-wrap" aria-label="SlowMate 首頁">
-        <span class="brand-title">SlowMate</span>
-        <span class="brand-subtitle">AI Travel Planner</span>
+      <a href="./" class="brand-wrap" aria-label="SlowMate 慢旅伴首頁">
+        <span class="brand-title">SlowMate 慢旅伴</span>
+        <span class="brand-subtitle">AI 慢旅行程規劃師</span>
       </a>
       <nav class="nav-actions" aria-label="頁面導覽">
         <button type="button" class="nav-support-btn" id="navSupportBtn">☕ 贊助支持</button>
@@ -1358,6 +1477,14 @@
             目前想去的景點或體驗
             <span class="form-sub">選填，AI 會幫你順路串連</span>
           </label>
+          <div class="vibe-chips" id="vibeChips" role="group" aria-label="慢旅風格快捷標籤（可複選）">
+            <button type="button" class="vibe-chip" aria-pressed="false" data-vibe="獨立咖啡與老屋">☕ 獨立咖啡與老屋</button>
+            <button type="button" class="vibe-chip" aria-pressed="false" data-vibe="自然山海散步">🌿 自然山海散步</button>
+            <button type="button" class="vibe-chip" aria-pressed="false" data-vibe="美術館與建築">🎨 美術館與建築</button>
+            <button type="button" class="vibe-chip" aria-pressed="false" data-vibe="在地早市與烘焙">🥐 在地早市與烘焙</button>
+            <button type="button" class="vibe-chip" aria-pressed="false" data-vibe="避開排隊名店">🚫 避開排隊名店</button>
+            <button type="button" class="vibe-chip" aria-pressed="false" data-vibe="極慢步調/長輩友善">🐢 極慢步調/長輩友善</button>
+          </div>
           <textarea id="wishesInput" class="form-textarea" rows="3" maxlength="500" placeholder="例如：想去清水寺、鴨川野餐、找安靜的老屋咖啡店、不喜歡排隊名店..."></textarea>
         </div>
 
@@ -1448,11 +1575,14 @@
       </div>
 
       <!-- 每日行程時間軸 -->
-      <div class="card">
+      <div class="card screen-only">
         <h2 class="section-title">🌿 每日慢旅時間軸</h2>
         <div class="day-tabs-wrapper" id="dayTabs" role="tablist" aria-label="選擇行程日期"></div>
         <div id="dayContentBox" role="tabpanel" tabindex="0"></div>
       </div>
+
+      <!-- 列印 / 另存 PDF 時展開全部天數（畫面上隱藏） -->
+      <div class="card print-only" id="printAllDays" aria-hidden="true"></div>
 
       <!-- 可打勾的行前待辦清單 -->
       <div class="card">
@@ -1463,7 +1593,12 @@
       </div>
 
       <button type="button" class="btn-primary btn-dark" id="resetPlanBtn">🔄 重新規劃另一趟旅程</button>
-      <p class="disclaimer">行程由 AI 生成，票價、營業時間與預約規則請於出發前至官方網站再次確認。</p>
+      <button type="button" class="btn-secondary print-btn" id="printBtn">🖨️ 列印 / 另存 PDF 手冊</button>
+
+      <aside class="slow-note" aria-label="慢旅伴的小叮嚀">
+        <strong>🌿 慢旅伴的小叮嚀：</strong>
+        <p>這份提案是為你梳理的旅行靈感。最迷人的風景往往藏在不期而遇的街角——實際出發時，請隨當天的天氣、體力與心情自由增減步調；造訪獨立小店或寺院前，也別忘了點擊「📍 導航」再次確認當日的營業時間與最新預約資訊喔！</p>
+      </aside>
     </section>
   </main>
 
@@ -1474,8 +1609,15 @@
       <h3 class="modal-title" id="paywallTitle">☕ 感謝你喜歡 SlowMate 慢旅伴！</h3>
       <p class="modal-body">
         <span id="paywallUsedLine" hidden>免費體驗額度已使用完畢。<br><br></span>
-        本工具由獨立創作者維護，每一次 AI 深度規劃皆需消耗雲端運算資源。若這份留白散策對你有所啟發，歡迎前往隨喜贊助 <strong>NT$ 88 / 150 / 300</strong>（請我喝杯咖啡支持伺服器維護）！<br><br>
-        付款完成後，系統將於 1~3 分鐘內自動寄送一組<strong>專屬一次性解鎖序號</strong>至您的信箱。
+        本工具由獨立創作者維護，每一次 AI 深度規劃皆需消耗雲端運算資源。若這份留白散策對你有所啟發，歡迎前往隨喜贊助（請我喝杯咖啡支持伺服器維護）！
+      </p>
+      <ul class="tier-list" aria-label="隨喜贊助方案">
+        <li class="tier"><span class="tier-price">NT$ 88</span><span class="tier-name">輕量解鎖</span></li>
+        <li class="tier"><span class="tier-price">NT$ 150</span><span class="tier-name">標準支持</span></li>
+        <li class="tier"><span class="tier-price">NT$ 300</span><span class="tier-name">深度熱情</span></li>
+      </ul>
+      <p class="modal-body">
+        三種金額權益相同：每次贊助都會換得 <strong>1 組專屬一次性解鎖序號</strong>，付款完成後 1~3 分鐘內自動寄送至您的信箱（信中附一鍵帶入連結）。
       </p>
       <a href="https://portaly.cc/samya_traveler" target="_blank" rel="noopener noreferrer" class="btn-portaly" id="portalyLink">
         ❤️ 前往 Portaly 隨喜贊助支持
@@ -1485,7 +1627,7 @@
         <input type="text" id="modalRedeemInput" class="form-input code-input" placeholder="SLOW-XXXX-YYYY" maxlength="20" autocomplete="off" autocapitalize="characters" spellcheck="false" />
         <p class="error-msg" id="modalCodeError" role="alert">序號無效或已被使用，請確認信件中的序號。</p>
       </div>
-      <button type="button" class="btn-primary" id="modalVerifyBtn">驗證序號並解鎖規劃</button>
+      <button type="button" class="btn-primary" id="modalVerifyBtn">驗證序號並立即生成</button>
       <p class="modal-footnote">
         💡 若超過 5 分鐘未收到序號信（請先查看垃圾郵件匣），歡迎私訊 IG
         <a href="https://www.instagram.com/samya_traveler/" target="_blank" rel="noopener noreferrer">@samya_traveler</a> 協助處理。
@@ -1572,6 +1714,10 @@
     const STORAGE_TODOS_KEY = 'slowmate_todo_state';
     const STORAGE_EMAIL_LOCK_KEY = 'slowmate_email_lock_until';
     const STORAGE_DRAFT_KEY = 'slowmate_form_draft';
+
+    // 行程頁尾、純文字行程、HTML 行程信統一使用的小叮嚀
+    const SLOW_NOTE_TITLE = '🌿 慢旅伴的小叮嚀：';
+    const SLOW_NOTE_BODY = '這份提案是為你梳理的旅行靈感。最迷人的風景往往藏在不期而遇的街角——實際出發時，請隨當天的天氣、體力與心情自由增減步調；造訪獨立小店或寺院前，也別忘了點擊「📍 導航」再次確認當日的營業時間與最新預約資訊喔！';
     const DRAFT_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
     const VALID_THEMES = ['kyoto', 'tokyo', 'nature_mountain', 'ocean_beach', 'default_train'];
@@ -1928,6 +2074,51 @@
       $('adminHint').classList.toggle('show', isAdmin(emailInput.value));
     }
 
+    /* ---------- 慢旅風格快捷標籤：點擊切換，文字自動串接進心願清單 ---------- */
+    const VIBE_SEP = '、';
+
+    function escapeRegExp(str) {
+      return str.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
+    }
+
+    function wishesHasVibe(vibe) {
+      return wishesInput.value.includes(vibe);
+    }
+
+    function appendVibe(vibe) {
+      const cur = wishesInput.value.replace(/[\s、，,]+$/, '');
+      const next = cur ? `${cur}${VIBE_SEP}${vibe}` : vibe;
+      if (next.length > 500) {
+        showToast('心願清單已接近 500 字上限');
+        return false;
+      }
+      wishesInput.value = next;
+      return true;
+    }
+
+    function removeVibe(vibe) {
+      const re = new RegExp(`[、，,\\s]*${escapeRegExp(vibe)}`);
+      wishesInput.value = wishesInput.value.replace(re, '').replace(/^[\s、，,]+/, '');
+    }
+
+    /** 依心願清單內容同步標籤狀態（使用者手動刪掉文字時，標籤也會自動取消） */
+    function syncVibeChips() {
+      document.querySelectorAll('.vibe-chip').forEach((chip) => {
+        chip.setAttribute('aria-pressed', String(wishesHasVibe(chip.dataset.vibe)));
+      });
+    }
+
+    function selectedVibes() {
+      return Array.from(document.querySelectorAll('.vibe-chip[aria-pressed="true"]')).map((c) => c.dataset.vibe);
+    }
+
+    function toggleVibe(chip) {
+      const vibe = chip.dataset.vibe;
+      if (wishesHasVibe(vibe)) removeVibe(vibe);
+      else appendVibe(vibe);
+      syncVibeChips();
+    }
+
     /* ---------- 表單草稿暫存（前往 Portaly 贊助前） ---------- */
     function saveFormDraft() {
       const draft = {
@@ -1936,6 +2127,7 @@
         end_date: endDateInput.value,
         user_wishes: wishesInput.value.trim(),
         email: emailInput.value.trim().toLowerCase(),
+        vibes: selectedVibes(),
         saved_at: Date.now()
       };
       if (!draft.destination && !draft.user_wishes && !draft.email) return; // 空表單不必暫存
@@ -1954,6 +2146,11 @@
       let restored = false;
       if (draft.destination) { destinationInput.value = String(draft.destination).slice(0, 60); restored = true; }
       if (draft.user_wishes) { wishesInput.value = String(draft.user_wishes).slice(0, 500); restored = true; }
+      if (Array.isArray(draft.vibes)) {
+        draft.vibes.forEach((v) => { if (typeof v === 'string' && !wishesHasVibe(v)) appendVibe(v); });
+        if (draft.vibes.length) restored = true;
+      }
+      syncVibeChips();
       if (draft.email) { emailInput.value = String(draft.email); restored = true; }
 
       // 日期：只在仍未過期（出發日 >= 今天）時恢復
@@ -2037,7 +2234,7 @@
       }
       const r = Math.max(0, Math.min(DAILY_LIMIT, remaining));
       quotaText.textContent = r > 0
-        ? `今日慢旅名額：剩餘 ${r} / ${DAILY_LIMIT} 席`
+        ? `今日慢旅名額：每日限定 ${DAILY_LIMIT} 席（剩餘 ${r} 席）`
         : `今日慢旅名額已滿，明日 00:00 重置`;
       quotaBadge.classList.toggle('is-full', r === 0);
       quotaBadge.classList.toggle('is-low', r > 0 && r <= 10);
@@ -2096,6 +2293,13 @@
       // 序號折疊區「驗證」：唯讀查詢，不核銷
       $('checkCodeBtn').addEventListener('click', checkRedeemCode);
       redeemCodeInput.addEventListener('input', () => setCodeStatus('', ''));
+
+      // 慢旅風格快捷標籤
+      document.querySelectorAll('.vibe-chip').forEach((chip) => chip.addEventListener('click', () => toggleVibe(chip)));
+      wishesInput.addEventListener('input', syncVibeChips);
+
+      // 列印 / 另存 PDF
+      $('printBtn').addEventListener('click', () => window.print());
 
       // 前往 Portaly 前：自動暫存表單草稿，回來（或點 Magic Link）時免重填
       $('portalyLink').addEventListener('click', saveFormDraft);
@@ -2500,7 +2704,7 @@
 
           let notice = '';
           if (result.code_preserved) {
-            notice = '🎁 貼心提醒：本次已優先使用您的首次免費額度，贊助序號【完好未核銷】，已自動為您保留至下次使用！';
+            notice = '🎁 貼心提醒：本次已優先使用您的首次免費額度，您的贊助序號【完好未核銷】，已保留至下次使用！';
           } else if (result.entitlement === 'redeem_code' && result.free_quota_preserved) {
             notice = '🎁 貼心提醒：本次已使用您的贊助序號，您的首次免費額度仍完整保留，下次驗證 Email 即可免費規劃一次！';
           }
@@ -2699,6 +2903,7 @@
       // 日期切換 Tabs 與每日時間軸
       state.activeDayIndex = 0;
       renderDayTabs(data.daily_itinerary || [], destination);
+      renderPrintAllDays(data.daily_itinerary || [], destination);
 
       // 待辦清單 Checkbox（支援狀態記憶）
       renderTodoChecklist(data.pre_trip_prep?.todo_checklist || []);
@@ -2804,7 +3009,11 @@
     function renderSingleDayTimeline(dayObj, destination, idx) {
       const box = $('dayContentBox');
       box.setAttribute('aria-labelledby', `day-tab-${idx}`);
+      box.innerHTML = `<div class="timeline-animate">${buildDayHtml(dayObj, destination, idx)}</div>`;
+    }
 
+    /** 單日時間軸 HTML（畫面切換 Tab 與列印全部天數共用） */
+    function buildDayHtml(dayObj, destination, idx) {
       const timelineHtml = (dayObj.timeline || []).map((item) => {
         const tagColor = safeColor(item.transport_tag?.color_code);
         const tagType = item.transport_tag?.type || '移動';
@@ -2833,16 +3042,22 @@
         </div>
       ` : '';
 
-      box.innerHTML = `
-        <div class="timeline-animate">
-          <div class="day-header-banner">
-            <div class="day-header-date">Day ${escapeHtml(dayObj.day_index || idx + 1)}${dayObj.date ? ' · ' + escapeHtml(dayObj.date) + ' ' + escapeHtml(formatTabDate(dayObj.date).replace(/^.*?（/, '（')) : ''}</div>
-            <div class="day-header-title">${escapeHtml(dayObj.day_title || '')}</div>
-          </div>
-          <ol class="timeline-list">${timelineHtml}</ol>
-          ${stayHtml}
+      return `
+        <div class="day-header-banner">
+          <div class="day-header-date">Day ${escapeHtml(dayObj.day_index || idx + 1)}${dayObj.date ? ' · ' + escapeHtml(dayObj.date) + ' ' + escapeHtml(formatTabDate(dayObj.date).replace(/^.*?（/, '（')) : ''}</div>
+          <div class="day-header-title">${escapeHtml(dayObj.day_title || '')}</div>
         </div>
+        <ol class="timeline-list">${timelineHtml}</ol>
+        ${stayHtml}
       `;
+    }
+
+    /** 列印 / 另存 PDF：一次展開全部天數 */
+    function renderPrintAllDays(days, destination) {
+      $('printAllDays').innerHTML = days.length
+        ? '<h2 class="section-title">🌿 每日慢旅時間軸</h2>' +
+          days.map((d, i) => `<section class="print-day">${buildDayHtml(d, destination, i)}</section>`).join('')
+        : '';
     }
 
     function renderTodoChecklist(todos) {
@@ -2929,7 +3144,8 @@
         lines.push('');
       }
 
-      lines.push('— 由 SlowMate AI Travel Planner 規劃 · https://samya-traveler.github.io/slowmate/');
+      lines.push(SLOW_NOTE_TITLE, SLOW_NOTE_BODY, '');
+      lines.push('— 由 SlowMate 慢旅伴｜AI 慢旅行程規劃師 規劃 · https://samya-traveler.github.io/slowmate/');
       return lines.join('\n');
     }
 
