@@ -7,18 +7,21 @@ import { TableClient } from '@azure/data-tables';
  * - DailyUsage   : PartitionKey = 計數器類型（'plan' 每日生成、'email' 每日寄信），RowKey = 台灣日期 YYYY-MM-DD，欄位 usedCount
  * - UserProfiles : PartitionKey = 'user'，RowKey = encodeURIComponent(email)，記錄免費試用與生成次數
  * - RedeemCodes  : PartitionKey = 'code'，RowKey = 序號（SLOW-XXXX-YYYY），欄位 is_used 等
+ * - EmailOtps    : PartitionKey = 'otp'，RowKey = encodeURIComponent(email)，首次免費額度的 Email 驗證碼
  *
  * 所有「讀 → 判斷 → 寫」都使用 ETag 樂觀鎖，避免高併發時超賣名額或重複核銷序號。
  */
 export const TABLES = {
   DailyUsage: 'DailyUsage',
   UserProfiles: 'UserProfiles',
-  RedeemCodes: 'RedeemCodes'
+  RedeemCodes: 'RedeemCodes',
+  EmailOtps: 'EmailOtps'
 } as const;
 export type TableName = (typeof TABLES)[keyof typeof TABLES];
 
 export const PROFILE_PK = 'user';
 export const CODE_PK = 'code';
+export const OTP_PK = 'otp';
 
 const clients = new Map<TableName, TableClient>();
 const ensured = new Set<TableName>();
@@ -269,7 +272,10 @@ export async function releaseLease(tableName: TableName, pk: string, rk: string,
   }
 }
 
-export function profileRowKey(email: string): string {
+export function emailRowKey(email: string): string {
   // RowKey 不允許 / \ # ? 與控制字元，encodeURIComponent 會把它們轉義
   return encodeURIComponent(email.trim().toLowerCase());
 }
+
+/** UserProfiles 的 RowKey（與 EmailOtps 共用同一種編碼） */
+export const profileRowKey = emailRowKey;

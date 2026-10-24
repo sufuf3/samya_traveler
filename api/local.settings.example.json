@@ -22,7 +22,12 @@
     "RESEND_REPLY_TO": "",
     "EMAIL_DAILY_CAP": "95",
 
-    "GENERATE_CODE_SECRET": "<long-random-string-shared-with-logic-app>"
+    "OTP_SECRET": "<another-long-random-string-for-otp-hashing>",
+    "OTP_MAX_SENDS_PER_DAY": "5",
+    "DISPOSABLE_EXTRA_DOMAINS": "",
+
+    "GENERATE_CODE_SECRET": "<long-random-string-shared-with-logic-app>",
+    "GENERATE_CODE_FUNCTION_KEY": ""
   },
   "Host": {
     "CORS": "*"

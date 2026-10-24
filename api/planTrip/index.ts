@@ -23,17 +23,19 @@ import {
   taipeiDateKey,
   tryIncrementCounter
 } from '../shared/storage';
+import { VerifyResult, consumeOtp, normalizeOtpInput, verifyOtp } from '../shared/otp';
 import { MAX_TRIP_DAYS, TRIP_JSON_SCHEMA, TripPlan, TripValidationError, listTripDates, sanitizeTrip } from '../shared/trip';
 
 /**
  * GET  /api/plan  → 查詢今日（台灣時間）全站剩餘名額
- * POST /api/plan  → 白名單檢查 → 資格判定（免費試用 / 一次性序號）→ 每日 50 次名額
+ * POST /api/plan  → 白名單檢查 → 資格判定（Email OTP 驗證的首次免費額度 / 一次性序號）→ 每日 50 次名額
  *                   → 呼叫 Azure AI Foundry 上的 Claude → 成功才核銷，失敗全數回滾
  *
  * 回應碼：
- *   200 成功        { data, remaining_daily_quota, entitlement }
- *   400 輸入錯誤    { error: 'invalid_input' | 'invalid_code', message }
+ *   200 成功        { data, remaining_daily_quota, entitlement, code_preserved, free_quota_preserved }
+ *   400 輸入錯誤    { error: 'invalid_input' | 'invalid_code' | 'invalid_otp' | 'otp_expired' | 'otp_locked' | 'otp_missing', message }
  *   402 需要贊助    { error: 'payment_required', message, portaly_url }
+ *   403 需驗證信箱  { status: 'otp_required', error: 'otp_required', message }
  *   409 處理中      { error: 'entitlement_busy', message }
  *   429 今日額滿    { error: 'token_limit_reached', message }
  *   502/504 AI 失敗 { error: 'generation_failed' | 'generation_timeout', message }
@@ -57,6 +59,7 @@ interface PlanRequestBody {
   start_date?: unknown;
   end_date?: unknown;
   user_wishes?: unknown;
+  otp_code?: unknown;
 }
 
 interface ValidatedRequest {
@@ -65,6 +68,7 @@ interface ValidatedRequest {
   destination: string;
   wishes: string;
   dates: string[];
+  otpCode: string;
 }
 
 function cleanText(v: unknown, max: number): string {
@@ -92,7 +96,12 @@ function validate(body: PlanRequestBody): ValidatedRequest {
     throw new BadRequestError('序號格式不正確，應為 SLOW-XXXX-YYYY。', 'invalid_code');
   }
 
-  return { email, redeemCode, destination, wishes, dates };
+  const otpCode = normalizeOtpInput(body.otp_code);
+  if (otpCode && !/^\d{6}$/.test(otpCode)) {
+    throw new BadRequestError('驗證碼應為 6 位數字。', 'invalid_otp');
+  }
+
+  return { email, redeemCode, destination, wishes, dates, otpCode };
 }
 
 /* ------------------------------------------------------------------ */
@@ -279,13 +288,56 @@ async function handleGet(request: HttpRequest): Promise<HttpResponseInit> {
   });
 }
 
-type Entitlement = 'admin' | 'free_trial' | 'redeem_code';
+type Entitlement = 'admin' | 'free_quota' | 'redeem_code';
+type CodeState = 'ok' | 'not_found' | 'used';
+
+async function lookupCode(code: string): Promise<CodeState> {
+  const codesTable = await getTable(TABLES.RedeemCodes);
+  const entity = await getEntityOrNull<{ is_used?: boolean }>(codesTable, CODE_PK, code);
+  if (!entity) return 'not_found';
+  return entity.is_used === true ? 'used' : 'ok';
+}
+
+function codeErrorResponse(request: HttpRequest, state: Exclude<CodeState, 'ok'>): HttpResponseInit {
+  return json(request, 400, {
+    error: 'invalid_code',
+    message: state === 'not_found' ? '查無此序號，請確認信件中的序號是否輸入正確。' : '此序號已被使用過了，一組序號僅限生成一次。'
+  });
+}
+
+function paymentRequired(request: HttpRequest): HttpResponseInit {
+  return json(request, 402, {
+    error: 'payment_required',
+    message: '此信箱的首次免費額度已使用過囉！歡迎隨喜贊助取得一次性解鎖序號。',
+    portaly_url: portalyUrl()
+  });
+}
+
+function otpErrorResponse(request: HttpRequest, result: Exclude<VerifyResult, { status: 'ok' }>): HttpResponseInit {
+  switch (result.status) {
+    case 'invalid':
+      return json(request, 400, {
+        error: 'invalid_otp',
+        message:
+          result.attemptsLeft > 0
+            ? `驗證碼不正確，還可以再試 ${result.attemptsLeft} 次。`
+            : '驗證碼錯誤次數過多，請重新寄送驗證碼。',
+        attempts_left: result.attemptsLeft
+      });
+    case 'expired':
+      return json(request, 400, { error: 'otp_expired', message: '驗證碼已過期（10 分鐘有效），請重新寄送驗證碼。' });
+    case 'locked':
+      return json(request, 400, { error: 'otp_locked', message: '驗證碼錯誤次數過多，請重新寄送驗證碼。' });
+    default:
+      return json(request, 400, { error: 'otp_missing', message: '請先寄送驗證碼到你的信箱。' });
+  }
+}
 
 async function handlePost(request: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
   const req = validate(await readJsonBody<PlanRequestBody>(request, 16 * 1024));
   const limit = dailyLimit();
 
-  /* 1. 管理員白名單：不扣名額、不需序號、無限次 */
+  /* 1. 管理員白名單：不需 OTP、不扣名額、不需序號、無限次 */
   if (isAdminEmail(req.email)) {
     try {
       const data = await generateTrip(req, context);
@@ -296,33 +348,42 @@ async function handlePost(request: HttpRequest, context: InvocationContext): Pro
     }
   }
 
-  /* 2. 資格預檢（唯讀）：免費試用優先，其次一次性序號 */
+  /* 2. 資格判定（唯讀）
+   *   - 帶 otp_code 且仍有免費額度：驗 OTP → 優先用免費額度，若同時填了有效序號則保留不核銷（code_preserved）。
+   *   - 免費額度已用過：OTP 無意義，有有效序號就用序號，否則 402。
+   *   - 只帶序號：序號本身具唯一性，免 OTP 直接核銷序號；免費額度保留（free_quota_preserved）。
+   *   - 兩者皆無：免費額度已用過 → 402；否則 403 otp_required，前端改走 /api/send-otp。
+   */
   const profilesTable = await getTable(TABLES.UserProfiles);
   const profileRk = profileRowKey(req.email);
-  const profile = await getEntityOrNull<{ free_trial_used?: boolean; generation_count?: number }>(
+  const profile = await getEntityOrNull<{ free_quota_used?: boolean; generation_count?: number }>(
     profilesTable,
     PROFILE_PK,
     profileRk
   );
+  const freeAvailable = profile?.free_quota_used !== true;
 
   let entitlement: Entitlement;
-  if (!profile || profile.free_trial_used !== true) {
-    entitlement = 'free_trial';
+  let codePreserved = false;
+  let freeQuotaPreserved = false;
+
+  if (req.otpCode && freeAvailable) {
+    const verified = await verifyOtp(req.email, req.otpCode);
+    if (verified.status !== 'ok') return otpErrorResponse(request, verified);
+    entitlement = 'free_quota';
+    codePreserved = !!req.redeemCode && (await lookupCode(req.redeemCode)) === 'ok';
   } else if (req.redeemCode) {
-    const codesTable = await getTable(TABLES.RedeemCodes);
-    const code = await getEntityOrNull<{ is_used?: boolean }>(codesTable, CODE_PK, req.redeemCode);
-    if (!code) {
-      return json(request, 400, { error: 'invalid_code', message: '查無此序號，請確認信件中的序號是否輸入正確。' });
-    }
-    if (code.is_used === true) {
-      return json(request, 400, { error: 'invalid_code', message: '此序號已被使用過了，一組序號僅限生成一次。' });
-    }
+    const state = await lookupCode(req.redeemCode);
+    if (state !== 'ok') return codeErrorResponse(request, state);
     entitlement = 'redeem_code';
+    freeQuotaPreserved = freeAvailable;
+  } else if (!freeAvailable) {
+    return paymentRequired(request);
   } else {
-    return json(request, 402, {
-      error: 'payment_required',
-      message: '此信箱的免費試用額度已使用完畢，歡迎隨喜贊助取得一次性解鎖序號。',
-      portaly_url: portalyUrl()
+    return json(request, 403, {
+      status: 'otp_required',
+      error: 'otp_required',
+      message: '首次免費規劃需要先驗證電子信箱，請收取 6 位數驗證碼。'
     });
   }
 
@@ -337,10 +398,10 @@ async function handlePost(request: HttpRequest, context: InvocationContext): Pro
     });
   }
 
-  /* 4. 取得資格租約（is_used 仍為 false，只是暫時鎖住防止併發重複使用） */
+  /* 4. 取得資格租約（is_used / free_quota_used 仍為 false，只是暫時鎖住防止併發重複使用） */
   const leaseTarget =
-    entitlement === 'free_trial'
-      ? { table: TABLES.UserProfiles, pk: PROFILE_PK, rk: profileRk, usedField: 'free_trial_used' }
+    entitlement === 'free_quota'
+      ? { table: TABLES.UserProfiles, pk: PROFILE_PK, rk: profileRk, usedField: 'free_quota_used' }
       : { table: TABLES.RedeemCodes, pk: CODE_PK, rk: req.redeemCode, usedField: 'is_used' };
 
   const lease = await acquireLease(
@@ -348,7 +409,7 @@ async function handlePost(request: HttpRequest, context: InvocationContext): Pro
     leaseTarget.pk,
     leaseTarget.rk,
     leaseTarget.usedField,
-    entitlement === 'free_trial'
+    entitlement === 'free_quota'
       ? { email: req.email, generation_count: 0, created_at: new Date().toISOString() }
       : undefined
   );
@@ -361,17 +422,10 @@ async function handlePost(request: HttpRequest, context: InvocationContext): Pro
         message: '這組資格正在另一個視窗生成行程中，請稍候 1 分鐘再試。'
       });
     }
-    if (entitlement === 'redeem_code') {
-      return json(request, 400, { error: 'invalid_code', message: '此序號已被使用過了，一組序號僅限生成一次。' });
-    }
-    return json(request, 402, {
-      error: 'payment_required',
-      message: '此信箱的免費試用額度已使用完畢，歡迎隨喜贊助取得一次性解鎖序號。',
-      portaly_url: portalyUrl()
-    });
+    return entitlement === 'redeem_code' ? codeErrorResponse(request, 'used') : paymentRequired(request);
   }
 
-  /* 5. 呼叫 Claude；失敗 → 釋放租約 + 退回名額（零損耗） */
+  /* 5. 呼叫 Claude；失敗 → 釋放租約 + 退回名額（零損耗，OTP 也保留可直接重試） */
   let data: TripPlan;
   try {
     data = await generateTrip(req, context);
@@ -386,15 +440,17 @@ async function handlePost(request: HttpRequest, context: InvocationContext): Pro
   /* 6. 成功 → 正式核銷 */
   const nowIso = new Date().toISOString();
   try {
-    if (entitlement === 'free_trial') {
+    if (entitlement === 'free_quota') {
       await completeLease(TABLES.UserProfiles, PROFILE_PK, profileRk, (cur) => ({
         email: req.email,
-        free_trial_used: true,
-        free_trial_used_at: nowIso,
+        free_quota_used: true,
+        free_quota_used_at: nowIso,
+        email_verified_at: nowIso,
         generation_count: (Number(cur.generation_count) || 0) + 1,
         last_generated_at: nowIso,
         last_destination: req.destination
       }));
+      await consumeOtp(req.email).catch((err) => context.warn('[planTrip] OTP 作廢失敗（不影響結果）', err));
     } else {
       await completeLease(TABLES.RedeemCodes, CODE_PK, req.redeemCode, () => ({
         is_used: true,
@@ -412,7 +468,9 @@ async function handlePost(request: HttpRequest, context: InvocationContext): Pro
   return json(request, 200, {
     data,
     remaining_daily_quota: Math.max(0, limit - reserved.used),
-    entitlement
+    entitlement,
+    code_preserved: codePreserved,
+    free_quota_preserved: freeQuotaPreserved
   });
 }
 
