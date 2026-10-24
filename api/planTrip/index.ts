@@ -9,7 +9,6 @@ import {
   readJsonBody
 } from '../shared/http';
 import {
-  CODE_PK,
   PROFILE_PK,
   TABLES,
   acquireLease,
@@ -24,6 +23,7 @@ import {
   tryIncrementCounter
 } from '../shared/storage';
 import { VerifyResult, consumeOtp, normalizeOtpInput, verifyOtp } from '../shared/otp';
+import { CODE_MESSAGES, CODE_RE, CodeState, cleanCode, inspectCode, lockCode, markCodeUsed, unlockCode } from '../shared/redeemCodes';
 import { MAX_TRIP_DAYS, TRIP_JSON_SCHEMA, TripPlan, TripValidationError, listTripDates, sanitizeTrip } from '../shared/trip';
 
 /**
@@ -36,13 +36,12 @@ import { MAX_TRIP_DAYS, TRIP_JSON_SCHEMA, TripPlan, TripValidationError, listTri
  *   400 輸入錯誤    { error: 'invalid_input' | 'invalid_code' | 'invalid_otp' | 'otp_expired' | 'otp_locked' | 'otp_missing', message }
  *   402 需要贊助    { error: 'payment_required', message, portaly_url }
  *   403 需驗證信箱  { status: 'otp_required', error: 'otp_required', message }
- *   409 處理中      { error: 'entitlement_busy', message }
+ *   409 處理中      { error: 'code_processing' | 'entitlement_busy', message }   序號 3 分鐘內正在生成 / 免費額度併發
  *   429 今日額滿    { error: 'token_limit_reached', message }
  *   502/504 AI 失敗 { error: 'generation_failed' | 'generation_timeout', message }
  */
 
 const COUNTER_KIND = 'plan';
-const CODE_RE = /^SLOW-[A-Z0-9]{4}-[A-Z0-9]{4}$/;
 
 function dailyLimit(): number {
   return envInt('DAILY_GLOBAL_LIMIT', 50);
@@ -91,7 +90,7 @@ function validate(body: PlanRequestBody): ValidatedRequest {
   if (dates.length < 1) throw new BadRequestError('結束日期不能早於開始日期。');
   if (dates.length > MAX_TRIP_DAYS) throw new BadRequestError(`慢旅助手目前最多支援 ${MAX_TRIP_DAYS} 天深度規劃，請調整日期區間。`);
 
-  const redeemCode = String(body.redeem_code ?? '').trim().toUpperCase();
+  const redeemCode = cleanCode(body.redeem_code);
   if (redeemCode && !CODE_RE.test(redeemCode)) {
     throw new BadRequestError('序號格式不正確，應為 SLOW-XXXX-YYYY。', 'invalid_code');
   }
@@ -289,20 +288,13 @@ async function handleGet(request: HttpRequest): Promise<HttpResponseInit> {
 }
 
 type Entitlement = 'admin' | 'free_quota' | 'redeem_code';
-type CodeState = 'ok' | 'not_found' | 'used';
 
-async function lookupCode(code: string): Promise<CodeState> {
-  const codesTable = await getTable(TABLES.RedeemCodes);
-  const entity = await getEntityOrNull<{ is_used?: boolean }>(codesTable, CODE_PK, code);
-  if (!entity) return 'not_found';
-  return entity.is_used === true ? 'used' : 'ok';
-}
-
-function codeErrorResponse(request: HttpRequest, state: Exclude<CodeState, 'ok'>): HttpResponseInit {
-  return json(request, 400, {
-    error: 'invalid_code',
-    message: state === 'not_found' ? '查無此序號，請確認信件中的序號是否輸入正確。' : '此序號已被使用過了，一組序號僅限生成一次。'
-  });
+/** 序號不可用時的回應：不存在 / 已使用 → 400；生成中（3 分鐘內）→ 409 */
+function codeErrorResponse(request: HttpRequest, state: Exclude<CodeState, 'unused'>): HttpResponseInit {
+  if (state === 'processing') {
+    return json(request, 409, { error: 'code_processing', message: CODE_MESSAGES.processing });
+  }
+  return json(request, 400, { error: 'invalid_code', message: CODE_MESSAGES[state] });
 }
 
 function paymentRequired(request: HttpRequest): HttpResponseInit {
@@ -371,10 +363,11 @@ async function handlePost(request: HttpRequest, context: InvocationContext): Pro
     const verified = await verifyOtp(req.email, req.otpCode);
     if (verified.status !== 'ok') return otpErrorResponse(request, verified);
     entitlement = 'free_quota';
-    codePreserved = !!req.redeemCode && (await lookupCode(req.redeemCode)) === 'ok';
+    codePreserved = !!req.redeemCode && (await inspectCode(req.redeemCode)) === 'unused';
   } else if (req.redeemCode) {
-    const state = await lookupCode(req.redeemCode);
-    if (state !== 'ok') return codeErrorResponse(request, state);
+    // 認碼不認信箱：不比對 sponsor_email，任何信箱持有有效序號都可兌換
+    const state = await inspectCode(req.redeemCode);
+    if (state !== 'unused') return codeErrorResponse(request, state);
     entitlement = 'redeem_code';
     freeQuotaPreserved = freeAvailable;
   } else if (!freeAvailable) {
@@ -398,46 +391,50 @@ async function handlePost(request: HttpRequest, context: InvocationContext): Pro
     });
   }
 
-  /* 4. 取得資格租約（is_used / free_quota_used 仍為 false，只是暫時鎖住防止併發重複使用） */
-  const leaseTarget =
-    entitlement === 'free_quota'
-      ? { table: TABLES.UserProfiles, pk: PROFILE_PK, rk: profileRk, usedField: 'free_quota_used' }
-      : { table: TABLES.RedeemCodes, pk: CODE_PK, rk: req.redeemCode, usedField: 'is_used' };
-
-  const lease = await acquireLease(
-    leaseTarget.table,
-    leaseTarget.pk,
-    leaseTarget.rk,
-    leaseTarget.usedField,
-    entitlement === 'free_quota'
-      ? { email: req.email, generation_count: 0, created_at: new Date().toISOString() }
-      : undefined
-  );
-
-  if (lease.status !== 'ok') {
-    await safeRollbackQuota(dateKey, context);
-    if (lease.status === 'busy') {
-      return json(request, 409, {
-        error: 'entitlement_busy',
-        message: '這組資格正在另一個視窗生成行程中，請稍候 1 分鐘再試。'
-      });
+  /* 4. 鎖定資格（is_used / free_quota_used 仍為 false）
+   *   - 序號：status unused → processing，寫入 locked_at（ETag 防雙開分頁重複刷碼）
+   *   - 免費額度：UserProfiles 租約
+   */
+  let release: () => Promise<void>;
+  if (entitlement === 'redeem_code') {
+    const lock = await lockCode(req.redeemCode);
+    if (lock.status !== 'ok') {
+      await safeRollbackQuota(dateKey, context);
+      return codeErrorResponse(request, lock.status);
     }
-    return entitlement === 'redeem_code' ? codeErrorResponse(request, 'used') : paymentRequired(request);
+    release = () => unlockCode(req.redeemCode, lock.lockId);
+  } else {
+    const lease = await acquireLease(TABLES.UserProfiles, PROFILE_PK, profileRk, 'free_quota_used', {
+      email: req.email,
+      generation_count: 0,
+      created_at: new Date().toISOString()
+    });
+    if (lease.status !== 'ok') {
+      await safeRollbackQuota(dateKey, context);
+      if (lease.status === 'busy') {
+        return json(request, 409, {
+          error: 'entitlement_busy',
+          message: '這組資格正在另一個視窗生成行程中，請稍候 1 分鐘再試。'
+        });
+      }
+      return paymentRequired(request);
+    }
+    release = () => releaseLease(TABLES.UserProfiles, PROFILE_PK, profileRk, lease.leaseId);
   }
 
-  /* 5. 呼叫 Claude；失敗 → 釋放租約 + 退回名額（零損耗，OTP 也保留可直接重試） */
+  /* 5. 呼叫 Claude；失敗 → 回滾為 unused / 釋放租約 + 退回每日名額（零損耗，OTP 也保留可直接重試） */
   let data: TripPlan;
   try {
     data = await generateTrip(req, context);
   } catch (err) {
-    await Promise.allSettled([
-      releaseLease(leaseTarget.table, leaseTarget.pk, leaseTarget.rk, lease.leaseId),
-      safeRollbackQuota(dateKey, context)
-    ]);
+    const results = await Promise.allSettled([release(), safeRollbackQuota(dateKey, context)]);
+    results.forEach((r) => {
+      if (r.status === 'rejected') context.error('[planTrip] 回滾失敗（序號會在 3 分鐘後自動視為逾時可用）', r.reason);
+    });
     return generationErrorResponse(request, context, err);
   }
 
-  /* 6. 成功 → 正式核銷 */
+  /* 6. Claude 成功回傳合法 JSON → 正式核銷 */
   const nowIso = new Date().toISOString();
   try {
     if (entitlement === 'free_quota') {
@@ -452,12 +449,10 @@ async function handlePost(request: HttpRequest, context: InvocationContext): Pro
       }));
       await consumeOtp(req.email).catch((err) => context.warn('[planTrip] OTP 作廢失敗（不影響結果）', err));
     } else {
-      await completeLease(TABLES.RedeemCodes, CODE_PK, req.redeemCode, () => ({
-        is_used: true,
-        used_at: nowIso,
+      await markCodeUsed(req.redeemCode, {
         used_by_email: req.email,
         used_for_destination: req.destination
-      }));
+      });
       await recordProfileUsage(req.email, req.destination, nowIso, context);
     }
   } catch (err) {

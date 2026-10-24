@@ -1121,6 +1121,21 @@
       box-shadow: 0 4px 12px rgba(224, 122, 95, 0.3);
     }
 
+    .modal-footnote {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      background: var(--bg-subtle);
+      border-radius: var(--radius-sm);
+      padding: 10px 12px;
+      margin-top: 14px;
+      line-height: 1.6;
+    }
+
+    .modal-footnote a {
+      color: var(--brand-sage-dark);
+      font-weight: 600;
+    }
+
     /* OTP 驗證碼彈窗 */
     .otp-target {
       color: var(--brand-sage-dark);
@@ -1471,6 +1486,10 @@
         <p class="error-msg" id="modalCodeError" role="alert">序號無效或已被使用，請確認信件中的序號。</p>
       </div>
       <button type="button" class="btn-primary" id="modalVerifyBtn">驗證序號並解鎖規劃</button>
+      <p class="modal-footnote">
+        💡 若超過 5 分鐘未收到序號信（請先查看垃圾郵件匣），歡迎私訊 IG
+        <a href="https://www.instagram.com/samya_traveler/" target="_blank" rel="noopener noreferrer">@samya_traveler</a> 協助處理。
+      </p>
     </div>
   </div>
 
@@ -1552,6 +1571,8 @@
     const STORAGE_TRIP_KEY = 'slowmate_last_trip';
     const STORAGE_TODOS_KEY = 'slowmate_todo_state';
     const STORAGE_EMAIL_LOCK_KEY = 'slowmate_email_lock_until';
+    const STORAGE_DRAFT_KEY = 'slowmate_form_draft';
+    const DRAFT_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
     const VALID_THEMES = ['kyoto', 'tokyo', 'nature_mountain', 'ocean_beach', 'default_train'];
 
@@ -1801,6 +1822,9 @@
       renderSvgTheme('default_train');
       initDefaultDates();
       loadSavedUserState();
+      const draftRestored = restoreFormDraft();
+      const magicApplied = applyMagicLinkCode();
+      if (!magicApplied && draftRestored) showToast('📝 已為您恢復贊助前填寫的表單內容');
       validateDateRange();
       updateAdminHint();
       restoreEmailLock();
@@ -1904,6 +1928,73 @@
       $('adminHint').classList.toggle('show', isAdmin(emailInput.value));
     }
 
+    /* ---------- 表單草稿暫存（前往 Portaly 贊助前） ---------- */
+    function saveFormDraft() {
+      const draft = {
+        destination: destinationInput.value.trim(),
+        start_date: startDateInput.value,
+        end_date: endDateInput.value,
+        user_wishes: wishesInput.value.trim(),
+        email: emailInput.value.trim().toLowerCase(),
+        saved_at: Date.now()
+      };
+      if (!draft.destination && !draft.user_wishes && !draft.email) return; // 空表單不必暫存
+      store.set(STORAGE_DRAFT_KEY, JSON.stringify(draft));
+    }
+
+    function restoreFormDraft() {
+      let draft = null;
+      try { draft = JSON.parse(store.get(STORAGE_DRAFT_KEY) || 'null'); } catch (_) { draft = null; }
+      if (!draft || typeof draft !== 'object') return false;
+      if (!draft.saved_at || Date.now() - draft.saved_at > DRAFT_MAX_AGE_MS) {
+        store.remove(STORAGE_DRAFT_KEY);
+        return false;
+      }
+
+      let restored = false;
+      if (draft.destination) { destinationInput.value = String(draft.destination).slice(0, 60); restored = true; }
+      if (draft.user_wishes) { wishesInput.value = String(draft.user_wishes).slice(0, 500); restored = true; }
+      if (draft.email) { emailInput.value = String(draft.email); restored = true; }
+
+      // 日期：只在仍未過期（出發日 >= 今天）時恢復
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const s = parseDateLocal(draft.start_date);
+      const e = parseDateLocal(draft.end_date);
+      if (s && e && s >= today && e >= s) {
+        startDateInput.value = draft.start_date;
+        endDateInput.value = draft.end_date;
+        endDateInput.min = draft.start_date;
+        restored = true;
+      }
+      return restored;
+    }
+
+    /* ---------- Magic Link：?code=SLOW-XXXX-YYYY 自動帶入序號 ---------- */
+    function applyMagicLinkCode() {
+      let params;
+      try { params = new URLSearchParams(window.location.search); } catch (_) { return false; }
+      const raw = params.get('code');
+      if (raw === null) return false;
+
+      // 先清除網址參數，保持網址乾淨（重新整理也不會重複帶入）
+      params.delete('code');
+      const query = params.toString();
+      try {
+        history.replaceState(history.state, '', window.location.pathname + (query ? `?${query}` : '') + window.location.hash);
+      } catch (_) {}
+
+      const code = raw.trim().toUpperCase();
+      if (!code) return false;
+
+      redeemCodeInput.value = code;
+      $('codeCollapseBox').classList.add('show');
+      $('toggleCodeBtn').setAttribute('aria-expanded', 'true');
+      showToast('✨ 已自動帶入您的贊助解鎖序號！');
+      checkRedeemCode(); // 背景唯讀查詢序號狀態，於輸入框下方顯示「✅ 序號有效」或錯誤原因
+      return true;
+    }
+
     /* ---------- LocalStorage：Email 與上次快取行程 ---------- */
     function readCachedTrip() {
       const raw = store.get(STORAGE_TRIP_KEY);
@@ -2005,6 +2096,9 @@
       // 序號折疊區「驗證」：唯讀查詢，不核銷
       $('checkCodeBtn').addEventListener('click', checkRedeemCode);
       redeemCodeInput.addEventListener('input', () => setCodeStatus('', ''));
+
+      // 前往 Portaly 前：自動暫存表單草稿，回來（或點 Magic Link）時免重填
+      $('portalyLink').addEventListener('click', saveFormDraft);
 
       // 第二次使用 / 贊助入口（Navbar 與表單）
       $('navSupportBtn').addEventListener('click', () => openPaywall('manual'));
@@ -2401,11 +2495,12 @@
         // 200 成功
         if (res.ok && result.data) {
           saveTrip(result.data);
+          store.remove(STORAGE_DRAFT_KEY); // 行程已生成，草稿任務完成
           if (typeof result.remaining_daily_quota === 'number') renderQuota(result.remaining_daily_quota);
 
           let notice = '';
           if (result.code_preserved) {
-            notice = '🎁 貼心提醒：本次已優先使用您的首次免費額度，贊助序號【完好未核銷】，已自動為您保留至下次規劃使用！';
+            notice = '🎁 貼心提醒：本次已優先使用您的首次免費額度，贊助序號【完好未核銷】，已自動為您保留至下次使用！';
           } else if (result.entitlement === 'redeem_code' && result.free_quota_preserved) {
             notice = '🎁 貼心提醒：本次已使用您的贊助序號，您的首次免費額度仍完整保留，下次驗證 Email 即可免費規劃一次！';
           }

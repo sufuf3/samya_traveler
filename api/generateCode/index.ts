@@ -3,42 +3,46 @@ import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/fu
 import { odata } from '@azure/data-tables';
 import { BadRequestError, json, normalizeEmail, readJsonBody } from '../shared/http';
 import { escapeHtml, sendMail } from '../shared/mailer';
+import { RedeemCodeEntity } from '../shared/redeemCodes';
 import { CODE_PK, TABLES, getTable, statusOf } from '../shared/storage';
 
 /**
  * POST /api/generateCode（舊路徑 /api/generate-code 仍可使用）
  *
- * 給 Azure Logic App 使用：收到 Portaly 贊助通知信後呼叫，產生一組 SLOW-XXXX-YYYY
- * 一次性序號寫入 RedeemCodes（PartitionKey "Code"，is_used = false）。
+ * 給 Azure Logic App 使用：監聽 Portaly 訂單完成通知信後呼叫，產生一組 SLOW-XXXX-YYYY
+ * 一次性序號寫入 RedeemCodes（PartitionKey "Code"，is_used = false、status = "unused"）。
  *
  * 隨喜三階支持 NT$ 88（輕量解鎖）/ 150（標準支持）/ 300（深度熱情）：
  * 權益完全一致，一次贊助 = 一組一次性序號，成功生成一次行程後即失效。
+ * 認碼不認信箱：序號不綁定 sponsor_email，可轉贈旅伴或跨信箱使用。
  * amount 只做紀錄；非三階金額（例如 Portaly 調價）仍照常發碼，僅記錄警告。
  *
  * 認證（擇一符合即放行）：
- *   - Query  ?code=<金鑰>  或 Header x-functions-key: <金鑰>（Azure Function Key 慣用寫法）
+ *   - Query ?code=<金鑰> 或 Header x-functions-key: <金鑰>（Azure Function Key 慣用寫法）
  *   - Header x-slowmate-secret: <金鑰>
- *   金鑰需等於 App Setting 的 GENERATE_CODE_SECRET 或 GENERATE_CODE_FUNCTION_KEY。
- *   兩個設定都沒填時一律拒絕（fail closed）。
- *   註：程式碼讀不到 Azure 平台自動產生的 Function Key，若要沿用它，請把該值複製到 GENERATE_CODE_FUNCTION_KEY。
+ *   金鑰需等於 App Setting 的 GENERATE_CODE_SECRET 或 GENERATE_CODE_FUNCTION_KEY；兩者都沒設定時一律拒絕。
+ *   程式讀不到 Azure 平台自動產生的 Function Key，要沿用它請把值複製到 GENERATE_CODE_FUNCTION_KEY。
  *
- * Body（皆為選填）：
+ * Request Body（皆為選填）：
  * {
- *   "sponsor_email": "fan@example.com",
+ *   "sponsor_email": "user@example.com",
  *   "sponsor_name": "小明",
- *   "amount": 150,
- *   "currency": "TWD",
- *   "order_id": "PT-123456",   // 也接受 portaly_order_id。唯一冪等鍵：只有同一個 order_id 才回傳同一組序號
+ *   "amount": 150,                          // 也接受 "150"、"NT$ 150"
+ *   "order_id": "PORTALY-20261024-XXXX",    // 也接受 portaly_order_id
  *   "notify": true
  * }
  *
- * 重複贊助：同一位贊助者（同 Email）贊助第 2、3 次時，只要 order_id 不同或未提供，每次都會產生全新序號。
+ * 冪等：只有傳入相同且非空的 order_id 才回傳同一組序號；否則每次呼叫都產生全新序號（支援同一信箱多次贊助）。
  *
  * 發信權責：
- *   - 有 RESEND_API_KEY、有 sponsor_email、且 notify !== false → 由本 Function 直接寄出序號信（delivery: 'function'）
- *   - 否則只回傳序號 JSON，由 Logic App 自行寄出（delivery: 'logic_app'）
+ *   - 有 RESEND_API_KEY、有 sponsor_email、且 notify !== false → 由本 Function 寄出序號信（delivery: 'function'），
+ *     信中附一鍵帶入連結 https://samya-traveler.github.io/slowmate/?code=SLOW-XXXX-YYYY
+ *   - 否則只回傳序號與 magic_link，由 Logic App 自行寄出（delivery: 'logic_app'）
  *
- * 回應：201 { code, created_at, email_sent, delivery }，order_id 重送時 200 { code, idempotent: true, ... }
+ * 回應：
+ *   201 { code, magic_link, created_at, amount, tier?, email_sent, delivery, order_id? }
+ *   200 { code, magic_link, idempotent: true, status, ... }   相同 order_id 重送
+ *   401 未通過認證
  */
 
 const SPONSOR_TIERS: Record<number, string> = {
@@ -66,6 +70,12 @@ function randomBlock(len: number): string {
 
 export function generateRedeemCode(): string {
   return `SLOW-${randomBlock(4)}-${randomBlock(4)}`;
+}
+
+/** 一鍵帶入序號的 Magic Link（前端讀取 ?code= 後自動填入並清除網址參數） */
+export function magicLink(code: string): string {
+  const base = (process.env.SLOWMATE_APP_URL || 'https://samya-traveler.github.io/slowmate/').replace(/\/?$/, '/');
+  return `${base}?code=${encodeURIComponent(code)}`;
 }
 
 function safeEqual(a: string, b: string): boolean {
@@ -102,24 +112,9 @@ interface GenerateCodeBody {
   notify?: unknown;
 }
 
-interface RedeemCodeEntity {
-  partitionKey: string;
-  rowKey: string;
-  code: string;
-  is_used: boolean;
-  created_at: string;
-  source: string;
-  sponsor_email: string;
-  sponsor_name: string;
-  amount: number;
-  tier: string;
-  currency: string;
-  portaly_order_id: string;
-  email_sent: boolean;
-}
-
 function renderCodeEmail(code: string, sponsorName: string): { html: string; text: string } {
   const name = sponsorName ? `${sponsorName}，` : '';
+  const link = magicLink(code);
   const html = `<!DOCTYPE html>
 <html lang="zh-TW"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
 <body style="margin:0;padding:0;background:#FBF9F5;font-family:'Noto Sans TC',-apple-system,BlinkMacSystemFont,'PingFang TC','Microsoft JhengHei',sans-serif;">
@@ -127,31 +122,34 @@ function renderCodeEmail(code: string, sponsorName: string): { html: string; tex
     <tr><td align="center" style="padding:28px 16px;">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#FFFFFF;border:1px solid #E6E1D6;border-radius:20px;">
         <tr><td style="padding:28px 24px;color:#2C3531;">
-          <div style="font-family:'Noto Serif TC',Georgia,serif;font-size:14px;letter-spacing:2px;color:#435E4F;font-weight:700;">SlowMate · AI Travel Planner</div>
+          <div style="font-family:'Noto Serif TC',Georgia,serif;font-size:14px;letter-spacing:2px;color:#435E4F;font-weight:700;">SlowMate 慢旅伴 · AI 慢旅行程規劃師</div>
           <h1 style="font-family:'Noto Serif TC',Georgia,serif;font-size:21px;margin:12px 0;">☕ ${escapeHtml(name)}謝謝你的隨喜贊助！</h1>
-          <p style="font-size:14px;line-height:1.8;color:#6E7873;margin:0 0 18px;">你的支持讓 SlowMate 能繼續陪伴更多旅人慢慢走。以下是你的專屬<strong>一次性解鎖序號</strong>：</p>
+          <p style="font-size:14px;line-height:1.8;color:#6E7873;margin:0 0 18px;">你的支持讓 SlowMate 慢旅伴能繼續陪伴更多旅人慢慢走。以下是你的專屬<strong>一次性解鎖序號</strong>：</p>
           <div style="text-align:center;background:#E6EFEA;border:1px dashed #5B7B6A;border-radius:14px;padding:18px 10px;font-family:'SFMono-Regular',Consolas,monospace;font-size:24px;font-weight:700;letter-spacing:3px;color:#435E4F;">${escapeHtml(code)}</div>
-          <p style="font-size:13px;line-height:1.8;color:#6E7873;margin:18px 0;">
-            • 一組序號可完整生成 1 次慢旅行程。<br>
+          <div style="text-align:center;margin:22px 0 6px;">
+            <a href="${escapeHtml(link)}" style="display:inline-block;background:#5B7B6A;color:#FFFFFF;text-decoration:none;font-weight:700;border-radius:12px;padding:12px 26px;font-size:15px;">✨ 一鍵帶入序號，回到 SlowMate 規劃旅程</a>
+          </div>
+          <p style="font-size:12px;line-height:1.7;color:#8A938E;text-align:center;margin:6px 0 18px;">點擊按鈕會自動填入序號，並恢復你贊助前填寫的表單內容。</p>
+          <p style="font-size:13px;line-height:1.8;color:#6E7873;margin:0;">
+            • 一組序號可完整生成 1 次慢旅行程，<strong>不限信箱</strong>，也可以轉贈給旅伴使用。<br>
             • 只有在行程「成功生成」後才會核銷；若遇到當日名額已滿或生成失敗，序號會完整保留。
           </p>
-          <div style="text-align:center;margin:22px 0 6px;">
-            <a href="https://samya-traveler.github.io/slowmate/" style="display:inline-block;background:#5B7B6A;color:#FFFFFF;text-decoration:none;font-weight:700;border-radius:12px;padding:12px 26px;font-size:15px;">✨ 立即前往 SlowMate 規劃旅程</a>
-          </div>
         </td></tr>
       </table>
-      <div style="font-size:12px;color:#6E7873;margin-top:14px;">Curated Slow Travel by @samya_traveler</div>
+      <div style="font-size:12px;color:#6E7873;margin-top:14px;">有任何問題歡迎私訊 IG @samya_traveler · Curated Slow Travel</div>
     </td></tr>
   </table>
 </body></html>`;
   const text = `${name}謝謝你的隨喜贊助！
 
-你的 SlowMate 一次性解鎖序號：${code}
+你的 SlowMate 慢旅伴一次性解鎖序號：${code}
 
-• 一組序號可完整生成 1 次慢旅行程。
+一鍵帶入序號：${link}
+
+• 一組序號可完整生成 1 次慢旅行程，不限信箱，也可以轉贈給旅伴使用。
 • 只有在行程成功生成後才會核銷；若遇到當日名額已滿或生成失敗，序號會完整保留。
 
-立即前往：https://samya-traveler.github.io/slowmate/
+有任何問題歡迎私訊 IG @samya_traveler
 — Curated Slow Travel by @samya_traveler`;
   return { html, text };
 }
@@ -173,25 +171,27 @@ export async function generateCode(request: HttpRequest, context: InvocationCont
     const amount = parseAmount(body.amount);
     const tier = SPONSOR_TIERS[amount] ?? '';
     const currency = String(body.currency ?? 'TWD').trim().toUpperCase().slice(0, 8) || 'TWD';
+    const orderId = String(body.order_id ?? body.portaly_order_id ?? '').trim().slice(0, 120);
+    const notify = body.notify !== false && body.notify !== 'false';
     if (amount && !tier) {
       context.warn(`[generateCode] 非 88/150/300 的贊助金額：${amount}（仍照常發碼）`);
     }
-    const orderId = String(body.order_id ?? body.portaly_order_id ?? '').trim().slice(0, 120);
-    const notify = body.notify !== false && body.notify !== 'false';
 
     const table = await getTable(TABLES.RedeemCodes);
 
-    // 冪等：只有「同一個 order_id」才回傳同一組序號；同一位贊助者的新贊助（不同或沒有 order_id）一律發新序號
+    // 冪等：只有「相同且非空的 order_id」才回傳同一組序號；同一信箱的新贊助（不同或沒有 order_id）一律發新序號
     if (orderId) {
       const existing = table.listEntities<RedeemCodeEntity>({
-        queryOptions: { filter: odata`PartitionKey eq ${CODE_PK} and portaly_order_id eq ${orderId}` }
+        queryOptions: { filter: odata`PartitionKey eq ${CODE_PK} and order_id eq ${orderId}` }
       });
       for await (const e of existing) {
         return json(request, 200, {
           code: e.rowKey,
+          magic_link: magicLink(e.rowKey as string),
           created_at: e.created_at,
-          is_used: e.is_used === true,
           amount: e.amount,
+          is_used: e.is_used === true,
+          status: e.status,
           email_sent: e.email_sent === true,
           order_id: orderId,
           idempotent: true
@@ -209,15 +209,18 @@ export async function generateCode(request: HttpRequest, context: InvocationCont
           rowKey: candidate,
           code: candidate,
           is_used: false,
-          created_at: createdAt,
-          source: 'portaly',
+          status: 'unused',
+          locked_at: '',
           sponsor_email: sponsorEmail,
           sponsor_name: sponsorName,
           amount,
           tier,
           currency,
-          portaly_order_id: orderId,
-          email_sent: false
+          order_id: orderId,
+          source: 'portaly',
+          email_sent: false,
+          created_at: createdAt,
+          used_at: ''
         });
         code = candidate;
       } catch (err) {
@@ -227,14 +230,14 @@ export async function generateCode(request: HttpRequest, context: InvocationCont
     }
     if (!code) throw new Error('序號連續碰撞，無法產生');
 
-    // 發信權責：有 Resend 金鑰且未指定 notify:false → Function 寄；否則交給 Logic App
+    // 發信權責：有 Resend 金鑰、有收件人且未指定 notify:false → Function 寄；否則交給 Logic App
     const functionSends = !!sponsorEmail && notify && !!process.env.RESEND_API_KEY;
     let emailSent = false;
     let emailError: string | undefined;
     if (functionSends) {
       try {
         const { html, text } = renderCodeEmail(code, sponsorName);
-        await sendMail({ to: sponsorEmail, subject: '☕ 謝謝你的贊助！這是你的 SlowMate 一次性解鎖序號', html, text });
+        await sendMail({ to: sponsorEmail, subject: '☕ 謝謝你的贊助！這是你的 SlowMate 慢旅伴一次性解鎖序號', html, text });
         emailSent = true;
         await table.updateEntity({ partitionKey: CODE_PK, rowKey: code, email_sent: true }, 'Merge');
       } catch (err) {
@@ -244,9 +247,10 @@ export async function generateCode(request: HttpRequest, context: InvocationCont
     }
     const delivery = emailSent ? 'function' : 'logic_app';
 
-    context.log(`[generateCode] created code=${code} order=${orderId || '-'} delivery=${delivery}`);
+    context.log(`[generateCode] created code=${code} amount=${amount} order=${orderId || '-'} delivery=${delivery}`);
     return json(request, 201, {
       code,
+      magic_link: magicLink(code),
       created_at: createdAt,
       amount,
       ...(tier ? { tier } : {}),
@@ -264,10 +268,10 @@ export async function generateCode(request: HttpRequest, context: InvocationCont
   }
 }
 
+// authLevel 為 anonymous，由 isAuthorized() 在程式內驗證，才能做到「Function Key 或 x-slowmate-secret 擇一」
 app.http('generateCode', {
   route: 'generateCode',
   methods: ['POST'],
-  // 改為 anonymous 並在程式內驗證，才能讓「Function Key 或 x-slowmate-secret 擇一」都可通過
   authLevel: 'anonymous',
   handler: generateCode
 });

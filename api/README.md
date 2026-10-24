@@ -8,7 +8,7 @@ SlowMate AI Travel Planner 的 Serverless 後端。前端是 `../slowmate/index.
 | `planTrip` | `GET /api/plan` | anonymous | 查今日（台灣時間）剩餘名額 `{ remaining_quota }` |
 | `planTrip` | `POST /api/plan` | anonymous | 白名單 → 資格（Email OTP 首次免費額度 / 序號）→ 每日 50 次 → Claude → 成功才核銷 |
 | `sendOtp` | `POST /api/send-otp` | anonymous | 首次免費額度的 6 位數 Email 驗證碼 |
-| `checkCode` | `POST /api/check-code` | anonymous | 唯讀查詢序號狀態（`valid` / `used` / `not_found`），不核銷 |
+| `checkCode` | `POST /api/check-code` | anonymous | 唯讀查詢序號狀態（`valid` / `processing` / `used` / `not_found`），不鎖定也不核銷 |
 | `sendEmail` | `POST /api/send-email` | anonymous | 以 Resend 寄出 HTML 行程信 |
 | `generateCode` | `POST /api/generateCode`（舊路徑 `/api/generate-code` 仍可用） | 程式內驗證：`?code=` / `x-functions-key` / `x-slowmate-secret` 擇一 | 給 Logic App 產生 `SLOW-XXXX-YYYY` 序號 |
 
@@ -16,7 +16,17 @@ SlowMate AI Travel Planner 的 Serverless 後端。前端是 `../slowmate/index.
 
 - `DailyUsage`：PartitionKey `plan`（每日生成）/ `email`（每日寄信），RowKey 是台灣日期 `YYYY-MM-DD`，欄位 `usedCount`
 - `UserProfiles`：PartitionKey `user`，RowKey 是 `encodeURIComponent(email)`，欄位 `free_quota_used`、`email_verified_at`、`generation_count`…
-- `RedeemCodes`：PartitionKey `Code`，RowKey 是序號（前後端皆 `trim().toUpperCase()`），欄位 `is_used`、`sponsor_email`、`amount`、`tier`、`created_at`、`used_at`、`used_by_email`、`portaly_order_id`…
+- `RedeemCodes`：PartitionKey `Code`，RowKey 是序號（前後端皆 `trim().toUpperCase()`），欄位 `is_used`、`status`（`unused` / `processing` / `used`）、`locked_at`、`sponsor_email`、`amount`、`tier`、`order_id`、`created_at`、`used_at`、`used_by_email`…
+
+## 序號狀態機（認碼不認信箱）
+
+序號不綁定 `sponsor_email`，任何信箱持有有效序號都能兌換，可轉贈旅伴。邏輯集中在 `shared/redeemCodes.ts`：
+
+1. `/api/plan` 收到序號 → 不存在或已使用回 400；`status = "processing"` 且 `locked_at` 未滿 3 分鐘回 409 `code_processing`。
+2. 預扣每日名額（額滿回 429，序號完全沒被動到）。
+3. 以 ETag 樂觀鎖把序號改為 `status = "processing"`、寫入 `locked_at`。雙開分頁同時送出時只有一個請求拿得到鎖，另一個回 409。
+4. 呼叫 Claude：成功回傳合法 JSON → `is_used = true`、`status = "used"`、寫入 `used_at`；失敗 → 回滾為 `is_used = false`、`status = "unused"`，並退回每日名額。
+5. 若 Function 在生成中途當掉沒能回滾，超過 3 分鐘的 `processing` 會被視為逾時，可以重新使用。
 - `EmailOtps`：PartitionKey `otp`，RowKey 是 `encodeURIComponent(email)`，欄位 `otp_hash`（不存明碼）、`expires_at`（10 分鐘）、`attempt_count`（最多 5 次）、`last_sent_at`（60 秒冷卻）、`send_day`/`send_count`（每信箱每日上限）
 
 ## 資格分流（POST /api/plan）
@@ -90,6 +100,7 @@ OTP 只有在行程「成功生成」後才作廢；AI 生成失敗時，10 分�
 | `OTP_MAX_SENDS_PER_DAY` | 5（同一信箱每日最多寄送驗證碼次數） |
 | `DISPOSABLE_EXTRA_DOMAINS` | 空（逗號分隔的額外免洗網域） |
 | `GENERATE_CODE_FUNCTION_KEY` | 空（想沿用 Azure Function Key 時，把它的值貼在這裡） |
+| `SLOWMATE_APP_URL` | `https://samya-traveler.github.io/slowmate/`（序號信 Magic Link 的網址） |
 
 ## 本機開發與部署
 
@@ -133,5 +144,5 @@ Portaly 贊助採「隨喜三階支持」：NT$ 88（輕量解鎖）/ 150（標�
 
 - **重複贊助**：同一位贊助者第 2、3 次贊助時，只要 `order_id` 不同或沒提供，每次都會產生全新序號。只有傳入完全相同的 `order_id` 才會回傳同一組序號（`idempotent: true`），`portaly_order_id` 也接受為別名。
 - **發信權責**：
-  - 有 `RESEND_API_KEY`、有 `sponsor_email`、且 `notify !== false` → 由 Function 寄出序號信，回應 `delivery: "function"`。
-  - 否則只回傳序號 JSON，回應 `delivery: "logic_app"`，由 Logic App 自行寄出。
+  - 有 `RESEND_API_KEY`、有 `sponsor_email`、且 `notify !== false` → 由 Function 寄出序號信，回應 `delivery: "function"`。信中附一鍵帶入連結 `https://samya-traveler.github.io/slowmate/?code=SLOW-XXXX-YYYY`。
+  - 否則只回傳序號 JSON，回應 `delivery: "logic_app"`，由 Logic App 自行寄出。回應中的 `magic_link` 可以直接放進 Logic App 的信件內容。
