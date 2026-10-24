@@ -1,0 +1,27 @@
+{
+  "name": "slowmate-api",
+  "version": "1.0.0",
+  "description": "SlowMate AI Travel Planner - Azure Functions (Node.js v4 programming model) backend",
+  "private": true,
+  "main": "dist/{planTrip,sendEmail,generateCode}/index.js",
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc -w",
+    "clean": "rm -rf dist",
+    "prestart": "npm run clean && npm run build",
+    "start": "func start",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@azure/data-tables": "^13.3.0",
+    "@azure/functions": "^4.6.0",
+    "resend": "^4.1.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.0",
+    "typescript": "^5.6.3"
+  }
+}
