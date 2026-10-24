@@ -137,7 +137,20 @@ npm start                                             # = build + func start
   再把檔案放到 Hugo repo 的 `static/slowmate/index.html`。根目錄的部落格首頁不需要更動。
 - **CORS**：腳本已設定 `https://samya-traveler.github.io`；本機 Hugo 開發（`http://localhost:1313`）請另外加入。
 
-## Logic App 串接 generateCode
+## 自動發碼：Google Apps Script（建議）
+
+Portaly 訂單通知寄到個人 Gmail（`littlebear.samya@gmail.com`）。Logic App 不允許「個人 Gmail 連接器 + HTTP 呼叫」放在同一個流程，
+因此改用 `deploy/portaly-apps-script.gs`，直接在該 Gmail 帳號內執行：
+
+1. 以 `littlebear.samya@gmail.com` 登入 https://script.google.com → 新增專案 → 貼上 `portaly-apps-script.gs` 全部內容。
+2. 「專案設定」→「指令碼屬性」新增 `GENERATE_CODE_SECRET`（值在 Azure Portal → `slowmate-api` → Environment variables）。
+3. 執行 `setup` 並授權：建立每 5 分鐘觸發器，並立即處理近 3 天的訂單。
+
+每封 `from:service@portaly.cc`、主旨「您有一筆新的訂單」的信會解析 `訂單編號`、買家 Email、金額，以 `order_id` 冪等呼叫 `generateCode`，
+由 Function 透過 Gmail 寄出序號信。解析失敗或 API 回 4xx 時會寄提醒信給自己並加上「SlowMate/需人工處理」標籤；5xx 下一輪自動重試。
+格式有疑問時執行 `debugLatestOrderEmail` 檢視原始內容與解析結果。
+
+## Logic App 串接 generateCode（替代方案）
 
 Portaly 贊助採「隨喜三階支持」：NT$ 88（輕量解鎖）/ 150（標準支持）/ 300（深度熱情）。三階權益完全一致，一次贊助換一組一次性序號。
 `amount` 可傳 `150`、`"150"` 或 `"NT$ 150"`，會記錄在序號上並對應 `tier`；非三階金額仍照常發碼，只在記錄中留下警告。
