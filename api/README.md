@@ -144,10 +144,13 @@ Portaly 訂單通知寄到個人 Gmail（`littlebear.samya@gmail.com`）。Logic
 
 1. 以 `littlebear.samya@gmail.com` 登入 https://script.google.com → 新增專案 → 貼上 `portaly-apps-script.gs` 全部內容。
 2. 「專案設定」→「指令碼屬性」新增 `GENERATE_CODE_SECRET`（值在 Azure Portal → `slowmate-api` → Environment variables）。
-3. 執行 `setup` 並授權：建立每 5 分鐘觸發器，並立即處理近 3 天的訂單。
+3. 執行 `setup` 並授權：建立「每 1 分鐘」即時檢查與「每 6 小時」補漏檢查（近 7 天），並立即處理一次。
 
 每封 `from:service@portaly.cc`、主旨「您有一筆新的訂單」的信會解析 `訂單編號`、買家 Email、金額，以 `order_id` 冪等呼叫 `generateCode`，
-由 Function 透過 Gmail 寄出序號信。解析失敗或 API 回 4xx 時會寄提醒信給自己並加上「SlowMate/需人工處理」標籤；5xx 下一輪自動重試。
+由 Function 透過 Gmail 寄出序號信；若 Function 寄信失敗，腳本會改用 `GmailApp` 直接寄出同版型的序號信。
+贊助者通常在付款後 1~2 分鐘內收到序號（1 分鐘是 Apps Script 觸發器的最短間隔；Portaly 目前沒有公開的 webhook）。
+已處理完的對話會直接略過不讀內容，每分鐘的檢查通常不到 1 秒，遠低於個人帳號每日 90 分鐘的觸發器執行額度。
+解析失敗或 API 回 4xx 時會寄提醒信給自己並加上「SlowMate/需人工處理」標籤；5xx 下一輪自動重試。
 格式有疑問時執行 `debugLatestOrderEmail` 檢視原始內容與解析結果。
 
 ## Logic App 串接 generateCode（替代方案）
