@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "SlowMate AI Travel Planner - Azure Functions (Node.js v4 programming model) backend",
   "private": true,
-  "main": "dist/{planTrip,sendOtp,sendEmail,generateCode}/index.js",
+  "main": "dist/{planTrip,sendOtp,checkCode,sendEmail,generateCode}/index.js",
   "scripts": {
     "build": "tsc",
     "watch": "tsc -w",

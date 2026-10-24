@@ -6,10 +6,14 @@ import { escapeHtml, sendMail } from '../shared/mailer';
 import { CODE_PK, TABLES, getTable, statusOf } from '../shared/storage';
 
 /**
- * POST /api/generate-code
+ * POST /api/generateCode（舊路徑 /api/generate-code 仍可使用）
  *
  * 給 Azure Logic App 使用：收到 Portaly 贊助通知信後呼叫，產生一組 SLOW-XXXX-YYYY
- * 一次性序號寫入 RedeemCodes（is_used = false）。
+ * 一次性序號寫入 RedeemCodes（PartitionKey "Code"，is_used = false）。
+ *
+ * 隨喜三階支持 NT$ 88（輕量解鎖）/ 150（標準支持）/ 300（深度熱情）：
+ * 權益完全一致，一次贊助 = 一組一次性序號，成功生成一次行程後即失效。
+ * amount 只做紀錄；非三階金額（例如 Portaly 調價）仍照常發碼，僅記錄警告。
  *
  * 認證（擇一符合即放行）：
  *   - Query  ?code=<金鑰>  或 Header x-functions-key: <金鑰>（Azure Function Key 慣用寫法）
@@ -36,6 +40,20 @@ import { CODE_PK, TABLES, getTable, statusOf } from '../shared/storage';
  *
  * 回應：201 { code, created_at, email_sent, delivery }，order_id 重送時 200 { code, idempotent: true, ... }
  */
+
+const SPONSOR_TIERS: Record<number, string> = {
+  88: '輕量解鎖',
+  150: '標準支持',
+  300: '深度熱情'
+};
+
+/** 接受 150、"150"、"NT$ 150"、"NT$1,500" 等格式，無法解析時回傳 0。 */
+function parseAmount(value: unknown): number {
+  if (typeof value === 'number') return Number.isFinite(value) && value > 0 ? value : 0;
+  const digits = String(value ?? '').replace(/[^\d.]/g, '');
+  const n = Number.parseFloat(digits);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
 
 // 排除易混淆字元 0/O、1/I/L
 const ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
@@ -94,6 +112,7 @@ interface RedeemCodeEntity {
   sponsor_email: string;
   sponsor_name: string;
   amount: number;
+  tier: string;
   currency: string;
   portaly_order_id: string;
   email_sent: boolean;
@@ -151,8 +170,12 @@ export async function generateCode(request: HttpRequest, context: InvocationCont
 
     const sponsorEmail = body.sponsor_email ? normalizeEmail(body.sponsor_email) : '';
     const sponsorName = String(body.sponsor_name ?? '').trim().slice(0, 60);
-    const amount = Number(body.amount);
-    const currency = String(body.currency ?? '').trim().toUpperCase().slice(0, 8);
+    const amount = parseAmount(body.amount);
+    const tier = SPONSOR_TIERS[amount] ?? '';
+    const currency = String(body.currency ?? 'TWD').trim().toUpperCase().slice(0, 8) || 'TWD';
+    if (amount && !tier) {
+      context.warn(`[generateCode] 非 88/150/300 的贊助金額：${amount}（仍照常發碼）`);
+    }
     const orderId = String(body.order_id ?? body.portaly_order_id ?? '').trim().slice(0, 120);
     const notify = body.notify !== false && body.notify !== 'false';
 
@@ -168,6 +191,7 @@ export async function generateCode(request: HttpRequest, context: InvocationCont
           code: e.rowKey,
           created_at: e.created_at,
           is_used: e.is_used === true,
+          amount: e.amount,
           email_sent: e.email_sent === true,
           order_id: orderId,
           idempotent: true
@@ -189,7 +213,8 @@ export async function generateCode(request: HttpRequest, context: InvocationCont
           source: 'portaly',
           sponsor_email: sponsorEmail,
           sponsor_name: sponsorName,
-          amount: Number.isFinite(amount) ? amount : 0,
+          amount,
+          tier,
           currency,
           portaly_order_id: orderId,
           email_sent: false
@@ -223,6 +248,8 @@ export async function generateCode(request: HttpRequest, context: InvocationCont
     return json(request, 201, {
       code,
       created_at: createdAt,
+      amount,
+      ...(tier ? { tier } : {}),
       email_sent: emailSent,
       delivery,
       ...(orderId ? { order_id: orderId } : {}),
@@ -238,9 +265,17 @@ export async function generateCode(request: HttpRequest, context: InvocationCont
 }
 
 app.http('generateCode', {
-  route: 'generate-code',
+  route: 'generateCode',
   methods: ['POST'],
   // 改為 anonymous 並在程式內驗證，才能讓「Function Key 或 x-slowmate-secret 擇一」都可通過
+  authLevel: 'anonymous',
+  handler: generateCode
+});
+
+// 舊路徑相容（先前文件與 Logic App 範例使用的 /api/generate-code）
+app.http('generateCodeLegacy', {
+  route: 'generate-code',
+  methods: ['POST'],
   authLevel: 'anonymous',
   handler: generateCode
 });

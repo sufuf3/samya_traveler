@@ -12,5 +12,5 @@
     "sourceMap": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["shared/**/*.ts", "planTrip/**/*.ts", "sendOtp/**/*.ts", "sendEmail/**/*.ts", "generateCode/**/*.ts"]
+  "include": ["shared/**/*.ts", "planTrip/**/*.ts", "sendOtp/**/*.ts", "checkCode/**/*.ts", "sendEmail/**/*.ts", "generateCode/**/*.ts"]
 }

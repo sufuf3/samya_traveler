@@ -3,10 +3,10 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0" />
-  <title>SlowMate — AI Travel Planner | 慢旅行程規劃助手</title>
+  <title>SlowMate 慢旅伴 — AI 慢旅行程規劃師</title>
   <meta name="description" content="注重留白與生活感的 AI 慢旅行程規劃助手。為你推薦交通周遊券、事前預約清單與悠閒散策動線。" />
   <meta name="theme-color" content="#FBF9F5" />
-  <meta property="og:title" content="SlowMate — AI Travel Planner" />
+  <meta property="og:title" content="SlowMate 慢旅伴 — AI 慢旅行程規劃師" />
   <meta property="og:description" content="放慢腳步，讓 AI 為你規劃一場留白的慢旅行程。" />
   <meta property="og:url" content="https://samya-traveler.github.io/slowmate/" />
   <meta property="og:type" content="website" />
@@ -529,6 +529,41 @@
     }
 
     .code-collapse-box.show { display: block; }
+
+    .code-verify-row {
+      display: flex;
+      gap: 8px;
+    }
+
+    .code-verify-row .form-input { flex: 1; min-width: 0; }
+
+    .code-verify-btn {
+      flex-shrink: 0;
+      padding: 0 16px;
+      border: none;
+      border-radius: var(--radius-md);
+      background: var(--brand-sage);
+      color: #fff;
+      font-family: inherit;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .code-verify-btn:hover:not(:disabled) { background: var(--brand-sage-dark); }
+    .code-verify-btn:disabled { background: #B8C4BE; cursor: not-allowed; }
+
+    .code-status {
+      display: none;
+      font-size: 0.82rem;
+      font-weight: 600;
+      margin-top: 8px;
+    }
+
+    .code-status.show { display: block; }
+    .code-status.is-valid { color: #2E7D46; }
+    .code-status.is-invalid { color: var(--danger); }
 
     .admin-hint {
       display: none;
@@ -1086,19 +1121,6 @@
       box-shadow: 0 4px 12px rgba(224, 122, 95, 0.3);
     }
 
-    .modal-reason {
-      display: none;
-      font-size: 0.86rem;
-      font-weight: 600;
-      color: #9A4A33;
-      background: #FDEEE8;
-      border-radius: var(--radius-sm);
-      padding: 8px 12px;
-      margin-bottom: 12px;
-    }
-
-    .modal-reason.show { display: block; }
-
     /* OTP 驗證碼彈窗 */
     .otp-target {
       color: var(--brand-sage-dark);
@@ -1341,7 +1363,7 @@
               🔑 我有贊助解鎖序號
             </button>
             <button type="button" class="entry-btn entry-btn-support" id="openSupportFromFormBtn">
-              ☕ 第二次使用？點此隨喜贊助取得序號
+              ☕ 第二次使用？贊助取得序號
             </button>
           </div>
           <div class="code-collapse-box" id="codeCollapseBox">
@@ -1349,7 +1371,11 @@
               一次性贊助解鎖序號
               <span class="form-sub">持有序號免 Email 驗證，成功生成才核銷</span>
             </label>
-            <input type="text" id="redeemCodeInput" class="form-input code-input" placeholder="SLOW-XXXX-YYYY" maxlength="20" autocomplete="off" autocapitalize="characters" spellcheck="false" />
+            <div class="code-verify-row">
+              <input type="text" id="redeemCodeInput" class="form-input code-input" placeholder="SLOW-XXXX-YYYY" maxlength="20" autocomplete="off" autocapitalize="characters" spellcheck="false" />
+              <button type="button" class="code-verify-btn" id="checkCodeBtn">驗證</button>
+            </div>
+            <p class="code-status" id="codeStatus" role="status" aria-live="polite"></p>
           </div>
         </div>
 
@@ -1430,21 +1456,21 @@
   <div class="modal-backdrop" id="paywallModal" role="dialog" aria-modal="true" aria-labelledby="paywallTitle">
     <div class="modal-card">
       <button type="button" class="modal-close" data-close-modal="paywallModal" aria-label="關閉">&times;</button>
-      <h3 class="modal-title" id="paywallTitle">☕ 感謝你喜歡 SlowMate！</h3>
-      <p class="modal-reason" id="paywallReason"></p>
+      <h3 class="modal-title" id="paywallTitle">☕ 感謝你喜歡 SlowMate 慢旅伴！</h3>
       <p class="modal-body">
-        每個信箱可免費規劃一次；第二次起，每一趟旅程使用一組<strong>一次性解鎖序號</strong>。<br><br>
-        本工具由獨立創作者維護，若這份慢旅建議對你有所啟發，歡迎隨喜贊助 <strong>300/150/88 TWD</strong> 支持持續營運！贊助完成後，系統將自動寄送一組專屬序號至你的信箱，回到這裡輸入即可立即生成。
+        <span id="paywallUsedLine" hidden>免費體驗額度已使用完畢。<br><br></span>
+        本工具由獨立創作者維護，每一次 AI 深度規劃皆需消耗雲端運算資源。若這份留白散策對你有所啟發，歡迎前往隨喜贊助 <strong>NT$ 88 / 150 / 300</strong>（請我喝杯咖啡支持伺服器維護）！<br><br>
+        付款完成後，系統將於 1~3 分鐘內自動寄送一組<strong>專屬一次性解鎖序號</strong>至您的信箱。
       </p>
       <a href="https://portaly.cc/samya_traveler" target="_blank" rel="noopener noreferrer" class="btn-portaly" id="portalyLink">
         ❤️ 前往 Portaly 隨喜贊助支持
       </a>
       <div class="form-group" style="margin-bottom: 12px;">
-        <label class="form-label" for="modalRedeemInput">輸入信件中的贊助解鎖序號</label>
+        <label class="form-label" for="modalRedeemInput">已完成贊助？請輸入信件中的解鎖序號</label>
         <input type="text" id="modalRedeemInput" class="form-input code-input" placeholder="SLOW-XXXX-YYYY" maxlength="20" autocomplete="off" autocapitalize="characters" spellcheck="false" />
         <p class="error-msg" id="modalCodeError" role="alert">序號無效或已被使用，請確認信件中的序號。</p>
       </div>
-      <button type="button" class="btn-primary" id="modalVerifyBtn">驗證序號並立即生成</button>
+      <button type="button" class="btn-primary" id="modalVerifyBtn">驗證序號並解鎖規劃</button>
     </div>
   </div>
 
@@ -1479,7 +1505,7 @@
       <h3 class="modal-title centered" id="limitTitle">感謝熱情支持！今日 50 個慢旅名額已滿，明日請早 🌿</h3>
       <p class="modal-body">
         今日全站 <strong>50 個 AI 慢旅規劃名額</strong>已全數使用完畢（每日台灣時間 00:00 自動重置）。<br><br>
-        <strong>請放心：</strong>本次並未扣除您的免費試用資格，若您有輸入贊助序號，該序號也<strong>完全未被核銷</strong>，明天再來探索吧！
+        <strong>請放心：</strong>本次並未扣除您的免費試用資格，若您有輸入贊助序號，該序號<strong>未被核銷，依然完整有效</strong>，明天再來探索吧！
       </p>
       <button type="button" class="btn-primary" data-close-modal="limitModal">好的，明天再來</button>
     </div>
@@ -1504,7 +1530,7 @@
   <div class="toast" id="toastMsg" role="status" aria-live="polite"></div>
 
   <footer>
-    Curated Slow Travel by <a href="../">@samya_traveler</a> · SlowMate AI Planner
+    Curated Slow Travel by <a href="../">@samya_traveler</a> · SlowMate 慢旅伴
   </footer>
 
   <script>
@@ -1976,6 +2002,10 @@
         });
       });
 
+      // 序號折疊區「驗證」：唯讀查詢，不核銷
+      $('checkCodeBtn').addEventListener('click', checkRedeemCode);
+      redeemCodeInput.addEventListener('input', () => setCodeStatus('', ''));
+
       // 第二次使用 / 贊助入口（Navbar 與表單）
       $('navSupportBtn').addEventListener('click', () => openPaywall('manual'));
       $('openSupportFromFormBtn').addEventListener('click', () => openPaywall('manual'));
@@ -2375,7 +2405,7 @@
 
           let notice = '';
           if (result.code_preserved) {
-            notice = `🎁 貼心提醒：本次已優先使用您的首次免費額度，您輸入的贊助序號【${payload.redeem_code}】完好未核銷，已保留至下次使用！`;
+            notice = '🎁 貼心提醒：本次已優先使用您的首次免費額度，贊助序號【完好未核銷】，已自動為您保留至下次規劃使用！';
           } else if (result.entitlement === 'redeem_code' && result.free_quota_preserved) {
             notice = '🎁 貼心提醒：本次已使用您的贊助序號，您的首次免費額度仍完整保留，下次驗證 Email 即可免費規劃一次！';
           }
@@ -2441,7 +2471,9 @@
         }
 
         // 5xx：AI 生成失敗（後端已回滾，不扣名額、序號或免費額度；驗證碼 10 分鐘內仍可再用）
-        showToast(result.message || 'AI 行程生成暫時失敗，本次未扣除任何名額或序號，請稍後再試');
+        showToast(payload.redeem_code
+          ? 'AI 行程生成中斷，您的序號未被核銷，依然完整有效，請稍後再試一次 🌿'
+          : (result.message || 'AI 行程生成暫時失敗，本次未扣除任何名額或免費額度，請稍後再試'));
         fetchDailyQuota();
       } catch (err) {
         stopLoadingQuotes();
@@ -2452,7 +2484,9 @@
           saveTrip(MOCK_DEMO_TRIP);
           renderTripResult(MOCK_DEMO_TRIP);
         } else {
-          showToast('無法連接慢旅規劃伺服器，請確認網路或稍後再試（未扣除任何名額或序號）');
+          showToast(payload.redeem_code
+            ? '連線中斷，您的序號未被核銷，依然完整有效，請確認網路後再試一次'
+            : '無法連接慢旅規劃伺服器，請確認網路或稍後再試（未扣除任何名額或免費額度）');
         }
       } finally {
         state.isSubmitting = false;
@@ -2460,17 +2494,56 @@
       }
     }
 
+    /* ---------- 序號折疊區：驗證序號狀態 (POST /api/check-code) ---------- */
+    function setCodeStatus(kind, msg) {
+      const el = $('codeStatus');
+      el.textContent = msg;
+      el.classList.toggle('show', !!msg);
+      el.classList.toggle('is-valid', kind === 'valid');
+      el.classList.toggle('is-invalid', !!msg && kind !== 'valid');
+      redeemCodeInput.classList.toggle('is-invalid', !!msg && kind !== 'valid');
+    }
+
+    async function checkRedeemCode() {
+      const code = redeemCodeInput.value.trim().toUpperCase();
+      redeemCodeInput.value = code;
+      if (!CODE_RE.test(code)) {
+        setCodeStatus('invalid', '序號格式應為 SLOW-XXXX-YYYY，請再確認一次。');
+        redeemCodeInput.focus();
+        return;
+      }
+      const btn = $('checkCodeBtn');
+      btn.disabled = true;
+      btn.textContent = '驗證中';
+      try {
+        const res = await fetch(`${API_BASE_URL}/check-code`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ redeem_code: code })
+        });
+        const result = await readJsonSafe(res);
+        if (res.ok && result.status === 'valid') {
+          setCodeStatus('valid', '✅ ' + (result.message || '序號有效！填好表單後即可直接開始規劃。'));
+        } else {
+          setCodeStatus('invalid', result.message || '序號無效或已被使用，請確認信件中的序號。');
+        }
+      } catch (_) {
+        setCodeStatus('invalid', '暫時無法驗證序號，你也可以直接按「開始慢旅規劃」，序號只在成功生成後才會核銷。');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '驗證';
+      }
+    }
+
     /* ---------- 贊助 / 序號 Modal ---------- */
     function openPaywall(reason, message, portalyUrl) {
-      const reasonEl = $('paywallReason');
       const err = $('modalCodeError');
       err.classList.remove('show');
-      reasonEl.classList.remove('show');
 
-      if (reason === 'payment_required') {
-        reasonEl.textContent = message || '此信箱的首次免費額度已使用過囉！';
-        reasonEl.classList.add('show');
-      } else if (reason === 'invalid_code') {
+      // 「免費體驗額度已使用完畢」只在後端回 402 時顯示；從 Navbar / 表單主動打開時不顯示
+      $('paywallUsedLine').hidden = reason !== 'payment_required';
+
+      if (reason === 'invalid_code') {
         err.textContent = message || '序號無效或已被使用，請確認信件中的序號。';
         err.classList.add('show');
       }

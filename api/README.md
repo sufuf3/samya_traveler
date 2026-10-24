@@ -8,14 +8,15 @@ SlowMate AI Travel Planner 的 Serverless 後端。前端是 `../slowmate/index.
 | `planTrip` | `GET /api/plan` | anonymous | 查今日（台灣時間）剩餘名額 `{ remaining_quota }` |
 | `planTrip` | `POST /api/plan` | anonymous | 白名單 → 資格（Email OTP 首次免費額度 / 序號）→ 每日 50 次 → Claude → 成功才核銷 |
 | `sendOtp` | `POST /api/send-otp` | anonymous | 首次免費額度的 6 位數 Email 驗證碼 |
+| `checkCode` | `POST /api/check-code` | anonymous | 唯讀查詢序號狀態（`valid` / `used` / `not_found`），不核銷 |
 | `sendEmail` | `POST /api/send-email` | anonymous | 以 Resend 寄出 HTML 行程信 |
-| `generateCode` | `POST /api/generate-code` | 程式內驗證：`?code=` / `x-functions-key` / `x-slowmate-secret` 擇一 | 給 Logic App 產生 `SLOW-XXXX-YYYY` 序號 |
+| `generateCode` | `POST /api/generateCode`（舊路徑 `/api/generate-code` 仍可用） | 程式內驗證：`?code=` / `x-functions-key` / `x-slowmate-secret` 擇一 | 給 Logic App 產生 `SLOW-XXXX-YYYY` 序號 |
 
 ## 資料表（Azure Table Storage，首次呼叫時自動建立）
 
 - `DailyUsage`：PartitionKey `plan`（每日生成）/ `email`（每日寄信），RowKey 是台灣日期 `YYYY-MM-DD`，欄位 `usedCount`
 - `UserProfiles`：PartitionKey `user`，RowKey 是 `encodeURIComponent(email)`，欄位 `free_quota_used`、`email_verified_at`、`generation_count`…
-- `RedeemCodes`：PartitionKey `code`，RowKey 是序號，欄位 `is_used`、`used_at`、`used_by_email`、`portaly_order_id`…
+- `RedeemCodes`：PartitionKey `Code`，RowKey 是序號（前後端皆 `trim().toUpperCase()`），欄位 `is_used`、`sponsor_email`、`amount`、`tier`、`created_at`、`used_at`、`used_by_email`、`portaly_order_id`…
 - `EmailOtps`：PartitionKey `otp`，RowKey 是 `encodeURIComponent(email)`，欄位 `otp_hash`（不存明碼）、`expires_at`（10 分鐘）、`attempt_count`（最多 5 次）、`last_sent_at`（60 秒冷卻）、`send_day`/`send_count`（每信箱每日上限）
 
 ## 資格分流（POST /api/plan）
@@ -110,9 +111,12 @@ npm start                                             # = build + func start
 
 ## Logic App 串接 generateCode
 
+Portaly 贊助採「隨喜三階支持」：NT$ 88（輕量解鎖）/ 150（標準支持）/ 300（深度熱情）。三階權益完全一致，一次贊助換一組一次性序號。
+`amount` 可傳 `150`、`"150"` 或 `"NT$ 150"`，會記錄在序號上並對應 `tier`；非三階金額仍照常發碼，只在記錄中留下警告。
+
 觸發條件：收到 Portaly 贊助通知信。接著加入一個 HTTP 動作，設定如下：
 
-- **Method**：`POST`
+- **Method**：`POST`，URI 為 `https://<app>.azurewebsites.net/api/generateCode`
 - **認證（擇一即可）**：
   - URI 加上 `?code=<金鑰>`，或 Header `x-functions-key: <金鑰>`
   - Header `x-slowmate-secret: <金鑰>`
