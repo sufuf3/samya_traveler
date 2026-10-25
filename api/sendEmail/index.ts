@@ -44,6 +44,31 @@ const C = {
   border: '#E6E1D6'
 };
 
+const PORTALY_URL = () => process.env.PORTALY_URL || 'https://portaly.cc/samya_traveler';
+const APP_URL = () => process.env.SLOWMATE_APP_URL || 'https://samya-traveler.github.io/slowmate/';
+
+const CTA_FORWARD = '💌 喜歡這份慢旅行程嗎？歡迎直接將這封信轉寄給你的旅伴一起討論！';
+const CTA_REVISIT = '☕ 出發前行程有變動嗎？買杯 NT$88 的咖啡支持獨立開發，就能獲得新序號重新微調行程喔！';
+
+/** 轉寄給旅伴 + 回訪 / 贊助鉤子（放在頁尾上方） */
+function ctaBlock(): string {
+  const btn = (href: string, label: string, bg: string, fg: string, border: string) =>
+    `<a href="${escapeHtml(href)}" target="_blank" style="display:inline-block;margin:4px 4px;padding:10px 18px;border-radius:12px;background:${bg};color:${fg};border:1px solid ${border};text-decoration:none;font-weight:700;font-size:14px;">${label}</a>`;
+  return `
+        <tr><td style="padding:0 16px 16px;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#FFF6E9;border:1px solid #F2D7A9;border-radius:16px;">
+            <tr><td style="padding:18px 18px 14px;font-size:14px;line-height:1.8;color:${C.text};">
+              <div style="margin-bottom:8px;">${escapeHtml(CTA_FORWARD)}</div>
+              <div>${escapeHtml(CTA_REVISIT)}</div>
+            </td></tr>
+            <tr><td align="center" style="padding:0 14px 18px;">
+              ${btn(PORTALY_URL(), '❤️ 贊助獲得新序號', C.coral, '#FFFFFF', C.coral)}
+              ${btn(APP_URL(), '🌿 回到 SlowMate 規劃', '#FFFFFF', C.sageDark, C.sage)}
+            </td></tr>
+          </table>
+        </td></tr>`;
+}
+
 function section(title: string, inner: string): string {
   if (!inner.trim()) return '';
   return `
@@ -183,6 +208,7 @@ function renderHtml(trip: TripPlan): string {
             </td></tr>
           </table>
         </td></tr>
+        ${ctaBlock()}
         <tr><td align="center" style="padding:8px 16px 24px;font-size:12px;color:${C.muted};line-height:1.7;">
           Curated Slow Travel by <a href="https://samya-traveler.github.io/" style="color:${C.sageDark};text-decoration:none;font-weight:600;">@samya_traveler</a> ·
           <a href="https://samya-traveler.github.io/slowmate/" style="color:${C.sageDark};text-decoration:none;font-weight:600;">SlowMate 慢旅伴</a>
@@ -233,6 +259,7 @@ function renderText(trip: TripPlan): string {
     lines.push('');
   }
   lines.push(SLOW_TRAVEL_NOTE_TITLE, SLOW_TRAVEL_NOTE_BODY, '');
+  lines.push(CTA_FORWARD, CTA_REVISIT, `• 贊助獲得新序號：${PORTALY_URL()}`, `• 回到 SlowMate 規劃：${APP_URL()}`, '');
   lines.push('— SlowMate 慢旅伴｜AI 慢旅行程規劃師 · https://samya-traveler.github.io/slowmate/');
   return lines.join('\n');
 }
