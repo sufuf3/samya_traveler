@@ -1,3 +1,4 @@
+import { createHash, timingSafeEqual } from 'node:crypto';
 import { HttpRequest, HttpResponseInit } from '@azure/functions';
 
 /**
@@ -24,7 +25,7 @@ export function corsHeaders(request: HttpRequest): Record<string, string> {
   const allowAll = list.includes('*');
   const headers: Record<string, string> = {
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, x-slowmate-secret',
+    'Access-Control-Allow-Headers': 'Content-Type, x-slowmate-secret, x-slowmate-admin',
     'Access-Control-Max-Age': '86400',
     Vary: 'Origin'
   };
@@ -88,13 +89,23 @@ export function normalizeEmail(value: unknown): string {
   return email;
 }
 
-/** 管理員白名單（不分大小寫）。預設為 sufuf3149@gmail.com，可用 ADMIN_EMAILS 以逗號分隔覆寫。 */
-export function isAdminEmail(email: string): boolean {
-  const list = (process.env.ADMIN_EMAILS || 'sufuf3149@gmail.com')
-    .split(',')
-    .map((s) => s.trim().toLowerCase())
-    .filter(Boolean);
-  return list.includes(email.trim().toLowerCase());
+export type AdminStatus = 'none' | 'valid' | 'invalid';
+
+/**
+ * 管理員通道：Header `x-slowmate-admin` 必須等於 App Setting `ADMIN_TOKEN`。
+ * Email 不再具有任何特權（舊版以 Email 白名單判斷，任何人輸入該 Email 即可無限免費使用）。
+ * - 沒帶 header → 'none'（一般使用者流程）
+ * - 帶了但不符，或伺服器未設定足夠長度（>= 32 字元）的 ADMIN_TOKEN → 'invalid'（fail closed）
+ */
+export function adminStatus(request: HttpRequest): AdminStatus {
+  const provided = (request.headers.get('x-slowmate-admin') || '').trim();
+  if (!provided) return 'none';
+  const expected = (process.env.ADMIN_TOKEN || '').trim();
+  if (expected.length < 32) return 'invalid';
+  // 先雜湊成等長摘要再比對，避免長度差異造成的時序側通道
+  const a = createHash('sha256').update(provided).digest();
+  const b = createHash('sha256').update(expected).digest();
+  return timingSafeEqual(a, b) ? 'valid' : 'invalid';
 }
 
 export function envInt(name: string, fallback: number): number {

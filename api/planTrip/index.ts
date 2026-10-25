@@ -2,7 +2,7 @@ import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/fu
 import {
   BadRequestError,
   envInt,
-  isAdminEmail,
+  adminStatus,
   json,
   normalizeEmail,
   preflight,
@@ -29,11 +29,12 @@ import { MAX_TRIP_DAYS, TripPlan, TripValidationError, listTripDates, sanitizeTr
 
 /**
  * GET  /api/plan  → 查詢今日（台灣時間）全站剩餘名額
- * POST /api/plan  → 白名單檢查 → 資格判定（Email OTP 驗證的首次免費額度 / 一次性序號）→ 每日 50 次名額
+ * POST /api/plan  → 管理員金鑰檢查（x-slowmate-admin）→ 資格判定（Email OTP 驗證的首次免費額度 / 一次性序號）→ 每日 50 次名額
  *                   → 呼叫 Azure OpenAI gpt-4.1（JSON mode）→ 成功才核銷，失敗全數回滾
  *
  * 回應碼：
  *   200 成功        { data, remaining_daily_quota, entitlement, code_preserved, free_quota_preserved }
+ *   401 管理員金鑰錯誤 { error: 'invalid_admin_token' }
  *   400 輸入錯誤    { error: 'invalid_input' | 'invalid_code' | 'invalid_otp' | 'otp_expired' | 'otp_locked' | 'otp_missing', message }
  *   402 需要贊助    { error: 'payment_required', message, portaly_url }
  *   403 需驗證信箱  { status: 'otp_required', error: 'otp_required', message }
@@ -397,8 +398,12 @@ async function handlePost(request: HttpRequest, context: InvocationContext): Pro
   const req = validate(await readJsonBody<PlanRequestBody>(request, 16 * 1024));
   const limit = dailyLimit();
 
-  /* 1. 管理員白名單：不需 OTP、不扣名額、不需序號、無限次 */
-  if (isAdminEmail(req.email)) {
+  /* 1. 管理員通道（需 x-slowmate-admin = ADMIN_TOKEN）：不需 OTP、不扣名額、不需序號、無限次 */
+  const admin = adminStatus(request);
+  if (admin === 'invalid') {
+    return json(request, 401, { error: 'invalid_admin_token', message: '管理員金鑰無效。' });
+  }
+  if (admin === 'valid') {
     try {
       const data = await generateTrip(req, context);
       const used = await readCounter(COUNTER_KIND, taipeiDateKey());

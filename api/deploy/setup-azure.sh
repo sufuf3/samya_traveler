@@ -134,7 +134,6 @@ SETTINGS=(
   "MAIL_FROM_NAME=SlowMate 慢旅伴"
   "EMAIL_DAILY_CAP=400"
   "DAILY_GLOBAL_LIMIT=50"
-  "ADMIN_EMAILS=sufuf3149@gmail.com"
   "PORTALY_URL=https://portaly.cc/samya_traveler"
   "ALLOWED_ORIGINS=$ALLOWED_ORIGIN,http://localhost:1313"
   "SLOWMATE_APP_URL=$ALLOWED_ORIGIN/slowmate/"
@@ -148,8 +147,12 @@ if ! has_setting GENERATE_CODE_SECRET; then
   SETTINGS+=("GENERATE_CODE_SECRET=$GENERATE_CODE_SECRET_NEW")
 fi
 has_setting OTP_SECRET || SETTINGS+=("OTP_SECRET=$(openssl rand -hex 32)")
+# 管理員金鑰（取代舊的 Email 白名單）：前端以 ?admin=<金鑰> 在自己的瀏覽器啟用一次
+has_setting ADMIN_TOKEN || SETTINGS+=("ADMIN_TOKEN=$(openssl rand -hex 32)")
 
 az functionapp config appsettings set -n "$APP_NAME" -g "$RESOURCE_GROUP" -o none --settings "${SETTINGS[@]}"
+# 舊版的 Email 白名單已停用，確保不留在設定中
+has_setting ADMIN_EMAILS && az functionapp config appsettings delete -n "$APP_NAME" -g "$RESOURCE_GROUP" --setting-names ADMIN_EMAILS -o none
 
 # ---------- 7. CORS ----------
 say "設定 CORS：$ALLOWED_ORIGIN、http://localhost:1313"

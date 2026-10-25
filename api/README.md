@@ -31,7 +31,7 @@ Email 當 RowKey 時只會轉義 Table Storage 不允許的字元（`/ \ # ?`、
 
 | 情況 | 行為 |
 |---|---|
-| 管理員白名單 `sufuf3149@gmail.com` | 免 OTP、免序號、不扣每日名額 |
+| 管理員模式（Header `x-slowmate-admin` = `ADMIN_TOKEN`） | 免 OTP、免序號、不扣每日名額；金鑰錯誤回 401。Email 本身不具任何特權 |
 | 只帶有效序號 | 免 OTP，直接核銷序號（認碼不認信箱）；若免費額度未用過，回傳 `free_quota_preserved: true` |
 | 帶 `otp_code` 且免費額度未用過 | 驗證 OTP → 使用免費額度；若同時帶有效序號，序號不核銷並回傳 `code_preserved: true` |
 | 免費額度已用過、沒有有效序號 | 402 `payment_required` |
@@ -42,6 +42,16 @@ OTP 只有在行程「成功生成」後才作廢；AI 生成失敗時，10 分�
 
 `/api/send-otp` 會先擋拋棄式信箱（400 `disposable_email`，清單在 `shared/disposable.ts`，可用 `DISPOSABLE_EXTRA_DOMAINS` 追加）。
 若該信箱已用過免費額度，會直接回 402、不寄信；今日全站名額已滿時回 429、不寄信。
+
+## 管理員模式
+
+管理員不再以 Email 白名單判斷（Email 會出現在公開的前端原始碼，任何人輸入即可無限免費使用）。改為：
+
+1. 後端 App Setting `ADMIN_TOKEN`（至少 32 字元的隨機字串，在 Azure Portal → `slowmate-api` → Environment variables 查看）。
+2. 在自己的瀏覽器開啟一次 `https://samya-traveler.github.io/slowmate/?admin=<ADMIN_TOKEN>`：
+   金鑰只存在該瀏覽器的 localStorage，網址參數會立即被移除，之後的 `/api/plan` 請求會帶上 `x-slowmate-admin` header。
+3. 關閉：開啟 `…/slowmate/?admin=off`。金鑰錯誤時後端回 401，前端會自動清除本機金鑰。
+4. 金鑰外洩時，直接在 Portal 換一組新的 `ADMIN_TOKEN`，舊金鑰立即失效。
 
 ## 序號狀態機（零損耗回滾）
 
@@ -102,6 +112,7 @@ OTP 只有在行程「成功生成」後才作廢；AI 生成失敗時，10 分�
 | `GMAIL_APP_PASSWORD` | Google 應用程式密碼（必填，否則無法寄信） |
 | `GENERATE_CODE_SECRET` | 與 Logic App 共用的長隨機字串 |
 | `OTP_SECRET` | OTP 雜湊用的 pepper，建議另設一組長隨機字串 |
+| `ADMIN_TOKEN` | 管理員金鑰（至少 32 字元，建議 `openssl rand -hex 32`）；未設定時管理員模式一律拒絕 |
 | `ALLOWED_ORIGINS` | 預設 `https://samya-traveler.github.io` |
 
 選填項目：
@@ -109,7 +120,6 @@ OTP 只有在行程「成功生成」後才作廢；AI 生成失敗時，10 分�
 | 變數 | 預設值 |
 |---|---|
 | `DAILY_GLOBAL_LIMIT` | 50 |
-| `ADMIN_EMAILS` | `sufuf3149@gmail.com` |
 | `EMAIL_DAILY_CAP` | 400 |
 | `AI_TIMEOUT_MS` | 120000 |
 | `MAIL_FROM_NAME` / `MAIL_REPLY_TO` | `SlowMate 慢旅伴` / 空 |

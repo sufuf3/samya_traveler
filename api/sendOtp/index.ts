@@ -1,6 +1,6 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions';
 import { isDisposableEmail } from '../shared/disposable';
-import { BadRequestError, envInt, isAdminEmail, json, normalizeEmail, preflight, readJsonBody } from '../shared/http';
+import { BadRequestError, envInt, json, normalizeEmail, preflight, readJsonBody } from '../shared/http';
 import { sendMail } from '../shared/mailer';
 import { OTP_RESEND_COOLDOWN_MS, OTP_TTL_MS, issueOtp, renderOtpEmail, rollbackIssuedOtp } from '../shared/otp';
 import {
@@ -22,7 +22,6 @@ import {
  *
  * 首次免費額度的 Email 驗證碼寄送。
  *   200 { status: 'otp_sent', email, expires_in, resend_after }
- *   200 { status: 'otp_not_required' }                 管理員白名單
  *   400 { error: 'invalid_input' | 'disposable_email' } 信箱格式錯誤 / 免洗信箱
  *   402 { error: 'payment_required', portaly_url }      此信箱已用過免費額度 → 不寄信
  *   429 { error: 'otp_cooldown', retry_after }          60 秒內已寄過
@@ -38,10 +37,6 @@ export async function sendOtp(request: HttpRequest, context: InvocationContext):
   try {
     const body = await readJsonBody<{ email?: unknown }>(request, 4 * 1024);
     const email = normalizeEmail(body.email);
-
-    if (isAdminEmail(email)) {
-      return json(request, 200, { status: 'otp_not_required', email });
-    }
 
     if (isDisposableEmail(email)) {
       return json(request, 400, {
