@@ -194,6 +194,7 @@ function renderHtml(trip: TripPlan): string {
             <tr><td align="center" style="padding:26px 20px;">
               <div style="font-family:'Noto Serif TC',Georgia,serif;font-size:14px;letter-spacing:2px;color:${C.sageDark};font-weight:700;">SlowMate 慢旅伴 · AI 慢旅行程規劃師</div>
               <div style="font-family:'Noto Serif TC',Georgia,serif;font-size:22px;font-weight:700;color:${C.text};margin:10px 0 8px;line-height:1.4;">${escapeHtml(s.theme_title)}</div>
+              ${s.traveler_persona ? `<div style="display:inline-block;margin:0 0 10px;padding:5px 14px;border-radius:999px;background:#FFFFFF;border:1px solid ${C.border};font-size:13px;font-weight:700;color:${C.sageDark};">慢旅人格｜${escapeHtml(s.traveler_persona)}</div>` : ''}
               <div style="font-size:14px;color:${C.muted};line-height:1.7;">${escapeHtml(s.vibe_description)}</div>
             </td></tr>
           </table>
@@ -227,6 +228,7 @@ function renderText(trip: TripPlan): string {
   const prep = trip.pre_trip_prep;
   const lines: string[] = [
     `🌿 【${s.theme_title || s.destination}】慢旅行程表`,
+    ...(s.traveler_persona ? [`慢旅人格：${s.traveler_persona}`] : []),
     s.vibe_description,
     '----------------------------------------',
     `✈️ 去程：${s.flight_card.outbound_hint}`,

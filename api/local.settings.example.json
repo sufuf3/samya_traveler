@@ -18,7 +18,9 @@
     "EMAIL_DAILY_CAP": "400",
 
     "DAILY_GLOBAL_LIMIT": "50",
-    "ADMIN_TOKEN": "<64-char-random-hex; openssl rand -hex 32>",
+    "VIP_POOL_LIMIT": "30",
+    "SPONSOR_MAX_USES": "88:1,150:1,300:1",
+    "ADMIN_SECRET": "<64-char-random-hex; openssl rand -hex 32>",
     "PORTALY_URL": "https://portaly.cc/samya_traveler",
     "ALLOWED_ORIGINS": "https://samya-traveler.github.io,http://localhost:1313,http://localhost:8080,http://127.0.0.1:8080",
     "SLOWMATE_APP_URL": "https://samya-traveler.github.io/slowmate/",

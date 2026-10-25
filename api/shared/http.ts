@@ -25,7 +25,7 @@ export function corsHeaders(request: HttpRequest): Record<string, string> {
   const allowAll = list.includes('*');
   const headers: Record<string, string> = {
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, x-slowmate-secret, x-slowmate-admin',
+    'Access-Control-Allow-Headers': 'Content-Type, x-slowmate-secret, x-slowmate-admin, x-admin-secret',
     'Access-Control-Max-Age': '86400',
     Vary: 'Origin'
   };
@@ -91,21 +91,30 @@ export function normalizeEmail(value: unknown): string {
 
 export type AdminStatus = 'none' | 'valid' | 'invalid';
 
-/**
- * 管理員通道：Header `x-slowmate-admin` 必須等於 App Setting `ADMIN_TOKEN`。
- * Email 不再具有任何特權（舊版以 Email 白名單判斷，任何人輸入該 Email 即可無限免費使用）。
- * - 沒帶 header → 'none'（一般使用者流程）
- * - 帶了但不符，或伺服器未設定足夠長度（>= 32 字元）的 ADMIN_TOKEN → 'invalid'（fail closed）
- */
-export function adminStatus(request: HttpRequest): AdminStatus {
-  const provided = (request.headers.get('x-slowmate-admin') || '').trim();
-  if (!provided) return 'none';
-  const expected = (process.env.ADMIN_TOKEN || '').trim();
-  if (expected.length < 32) return 'invalid';
-  // 先雜湊成等長摘要再比對，避免長度差異造成的時序側通道
+/** 管理員金鑰：App Setting `ADMIN_SECRET`（舊名 `ADMIN_TOKEN` 仍可使用）。 */
+export function adminSecret(): string {
+  return (process.env.ADMIN_SECRET || process.env.ADMIN_TOKEN || '').trim();
+}
+
+/** 定長比對兩個字串（先雜湊成等長摘要，避免長度差異造成的時序側通道）。 */
+export function secretEquals(provided: string, expected: string): boolean {
   const a = createHash('sha256').update(provided).digest();
   const b = createHash('sha256').update(expected).digest();
-  return timingSafeEqual(a, b) ? 'valid' : 'invalid';
+  return timingSafeEqual(a, b);
+}
+
+/**
+ * 管理員通道（白名單）：Header `x-admin-secret`（或舊名 `x-slowmate-admin`）必須等於 ADMIN_SECRET。
+ * Email 不具有任何特權：頁面原始碼是公開的，若以 Email 判斷白名單，任何人輸入該 Email 即可無限免費使用。
+ * - 沒帶 header → 'none'（一般使用者流程）
+ * - 帶了但不符，或伺服器未設定足夠長度（>= 32 字元）的金鑰 → 'invalid'（fail closed）
+ */
+export function adminStatus(request: HttpRequest): AdminStatus {
+  const provided = (request.headers.get('x-admin-secret') || request.headers.get('x-slowmate-admin') || '').trim();
+  if (!provided) return 'none';
+  const expected = adminSecret();
+  if (expected.length < 32) return 'invalid';
+  return secretEquals(provided, expected) ? 'valid' : 'invalid';
 }
 
 export function envInt(name: string, fallback: number): number {

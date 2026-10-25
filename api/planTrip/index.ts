@@ -9,45 +9,48 @@ import {
   readJsonBody
 } from '../shared/http';
 import {
-  PLAN_COUNTER,
   PROFILE_PK,
+  PoolField,
+  PoolKind,
+  PoolRemaining,
   TABLES,
   acquireLease,
   completeLease,
-  decrementCounter,
   getEntityOrNull,
   getTable,
+  poolLimits,
+  poolRemaining,
   profileRowKey,
-  readCounter,
+  readPoolUsage,
   releaseLease,
-  taipeiDateKey,
-  tryIncrementCounter
+  releasePool,
+  reservePool,
+  taipeiDateKey
 } from '../shared/storage';
 import { VerifyResult, consumeOtp, normalizeOtpInput, verifyOtp } from '../shared/otp';
-import { CODE_MESSAGES, CODE_RE, CodeState, cleanCode, inspectCode, lockCode, markCodeUsed, unlockCode } from '../shared/redeemCodes';
+import { CODE_MESSAGES, CODE_RE, CodeProblem, cleanCode, inspectCode, lockCode, markCodeUsed, unlockCode } from '../shared/redeemCodes';
 import { MAX_TRIP_DAYS, TripPlan, TripValidationError, listTripDates, sanitizeTrip } from '../shared/trip';
 
 /**
- * GET  /api/plan  → 查詢今日（台灣時間）全站剩餘名額
- * POST /api/plan  → 管理員金鑰檢查（x-slowmate-admin）→ 資格判定（Email OTP 驗證的首次免費額度 / 一次性序號）→ 每日 50 次名額
+ * GET  /api/plan  → 今日（台灣時間）雙水池名額 { free_remaining, vip_pool_remaining, code_total_remaining }
+ * POST /api/plan  → 管理員白名單（x-admin-secret）→ 資格判定（Email OTP 首次免費額度 / 多次數序號）→ 雙水池預扣
  *                   → 呼叫 Azure OpenAI gpt-4.1（JSON mode）→ 成功才核銷，失敗全數回滾
  *
+ * 雙水池（每日 00:00 台灣時間重置）：
+ *   免費席 50：首次免費試用者只能用這一池
+ *   序號保留席 30：持序號者先用免費席，免費席滿了才動用保留席（序號者每日最多可兌換 80 席）
+ *   管理員：不受限，只累計 vip_whitelist_used
+ *
  * 回應碼：
- *   200 成功        { data, remaining_daily_quota, entitlement, code_preserved, free_quota_preserved }
+ *   200 成功        { data, entitlement, code_preserved, free_quota_preserved, code_remaining_uses?, ...雙水池名額 }
  *   401 管理員金鑰錯誤 { error: 'invalid_admin_token' }
  *   400 輸入錯誤    { error: 'invalid_input' | 'invalid_code' | 'invalid_otp' | 'otp_expired' | 'otp_locked' | 'otp_missing', message }
  *   402 需要贊助    { error: 'payment_required', message, portaly_url }
- *   403 需驗證信箱  { status: 'otp_required', error: 'otp_required', message }
- *   409 處理中      { error: 'code_processing' | 'entitlement_busy', message }   序號 3 分鐘內正在生成 / 免費額度併發
- *   429 今日額滿    { error: 'token_limit_reached', message }
+ *   403 需驗證信箱  { status: 'otp_required', error: 'otp_required', reason?: 'free_first', message }
+ *   409 處理中      { error: 'code_processing' | 'entitlement_busy', message }
+ *   429 今日額滿    { error: 'free_pool_full' | 'token_limit_reached', message }
  *   502/504 AI 失敗 { error: 'generation_failed' | 'generation_timeout', message }
  */
-
-const COUNTER_KIND = PLAN_COUNTER;
-
-function dailyLimit(): number {
-  return envInt('DAILY_GLOBAL_LIMIT', 50);
-}
 
 function portalyUrl(): string {
   return process.env.PORTALY_URL || 'https://portaly.cc/samya_traveler';
@@ -94,7 +97,7 @@ function validate(body: PlanRequestBody): ValidatedRequest {
 
   const redeemCode = cleanCode(body.redeem_code);
   if (redeemCode && !CODE_RE.test(redeemCode)) {
-    throw new BadRequestError('序號格式不正確，應為 SLOW-XXXX-YYYY。', 'invalid_code');
+    throw new BadRequestError('序號格式不正確，請確認信件或活動貼文中的序號。', 'invalid_code');
   }
 
   const otpCode = normalizeOtpInput(body.otp_code);
@@ -182,6 +185,7 @@ ${season.guidance}
 - 台灣出發：flight_card 給出從台灣（桃園/松山/高雄）出發的去程與回程建議；若目的地在台灣境內，改寫為高鐵/台鐵/客運等進出城建議。
 - 交通標籤 transport_tag 的 type 使用簡短中文（步行、巴士、地鐵、電車、JR、高鐵、台鐵、計程車、渡輪、自行車、開車），color_code 使用 HEX：
   步行 #5B7B6A、巴士 #E07A5F、地鐵 #4A90E2、電車/JR/高鐵/台鐵 #3F51B5、計程車 #9C27B0、渡輪 #00ACC1、自行車 #8BC34A、開車 #795548。
+- traveler_persona 是這趟旅程的「慢旅人格標籤」：1 個貼切的 emoji + 空格 + 6~10 字的稱號（例如「🍵 古都老屋駐留者」「🌊 海風午睡研究員」），呼應目的地與使用者偏好，溫柔有記憶點，適合分享到社群。
 - svg_theme 只能是 kyoto（京都/古都/神社寺院）、tokyo（大都市/城市景觀）、nature_mountain（山林/溫泉/高原）、ocean_beach（海島/海邊）、default_train（其他或鐵道小鎮）其中之一。
 - daily_itinerary 的天數必須與使用者提供的日期完全一致，day_index 從 1 開始、date 與使用者提供的日期逐一對應。
 - stay_info 建議住宿「區域」與旅宿氛圍，不要指名特定飯店品牌。
@@ -191,7 +195,7 @@ ${density}
 【輸出格式（非常重要）】
 - 只輸出一個合法的 JSON 物件，不要任何說明文字，不要使用 \`\`\`json 或任何 Markdown 標籤。
 - JSON 結構必須完全符合下列欄位（不可增減欄位、不可改名）：
-{"trip_summary":{"destination":"","theme_title":"","vibe_description":"","svg_theme":"default_train","flight_card":{"outbound_hint":"","inbound_hint":""}},"pre_trip_prep":{"transport_passes":[{"name":"","description":"","buy_timing":""}],"advance_reservations":[{"target":"","deadline_note":"","tips":""}],"todo_checklist":[""]},"daily_itinerary":[{"day_index":1,"date":"YYYY-MM-DD","day_title":"","timeline":[{"time_slot":"上午","title":"","is_must_visit":false,"transport_tag":{"type":"步行","color_code":"#5B7B6A"},"description":""}],"stay_info":{"area_recommendation":"","hotel_vibe":""}}]}`;
+{"trip_summary":{"destination":"","theme_title":"","traveler_persona":"","vibe_description":"","svg_theme":"default_train","flight_card":{"outbound_hint":"","inbound_hint":""}},"pre_trip_prep":{"transport_passes":[{"name":"","description":"","buy_timing":""}],"advance_reservations":[{"target":"","deadline_note":"","tips":""}],"todo_checklist":[""]},"daily_itinerary":[{"day_index":1,"date":"YYYY-MM-DD","day_title":"","timeline":[{"time_slot":"上午","title":"","is_must_visit":false,"transport_tag":{"type":"步行","color_code":"#5B7B6A"},"description":""}],"stay_info":{"area_recommendation":"","hotel_vibe":""}}]}`;
 }
 
 function buildUserPrompt(req: ValidatedRequest, season: SeasonHint): string {
@@ -343,14 +347,18 @@ async function generateTrip(req: ValidatedRequest, context: InvocationContext): 
 /* Handlers                                                             */
 /* ------------------------------------------------------------------ */
 
+/** 回應中共用的名額欄位（remaining_quota / remaining_daily_quota 為舊版前端相容欄位，等於免費席剩餘） */
+function poolFields(rem: PoolRemaining) {
+  const { free, vip } = poolLimits();
+  return { ...rem, free_limit: free, vip_limit: vip, remaining_quota: rem.free_remaining, remaining_daily_quota: rem.free_remaining };
+}
+
 async function handleGet(request: HttpRequest): Promise<HttpResponseInit> {
   const dateKey = taipeiDateKey();
-  const limit = dailyLimit();
-  const used = await readCounter(COUNTER_KIND, dateKey);
+  const usage = await readPoolUsage(dateKey);
   return json(request, 200, {
-    remaining_quota: Math.max(0, limit - used),
-    daily_limit: limit,
-    used_count: used,
+    ...poolFields(poolRemaining(usage)),
+    daily_limit: poolLimits().free,
     date_key: dateKey,
     timezone: 'Asia/Taipei'
   });
@@ -358,19 +366,35 @@ async function handleGet(request: HttpRequest): Promise<HttpResponseInit> {
 
 type Entitlement = 'admin' | 'free_quota' | 'redeem_code';
 
-/** 序號不可用時的回應：不存在 / 已使用 → 400；生成中（3 分鐘內）→ 409 */
-function codeErrorResponse(request: HttpRequest, state: Exclude<CodeState, 'unused'>): HttpResponseInit {
-  if (state === 'processing') {
+/** 序號不可用時的回應：生成中 → 409；其他 → 400 */
+function codeErrorResponse(request: HttpRequest, problem: CodeProblem): HttpResponseInit {
+  if (problem === 'processing') {
     return json(request, 409, { error: 'code_processing', message: CODE_MESSAGES.processing });
   }
-  return json(request, 400, { error: 'invalid_code', message: CODE_MESSAGES[state] });
+  return json(request, 400, { error: 'invalid_code', reason: problem, message: CODE_MESSAGES[problem] });
 }
 
 function paymentRequired(request: HttpRequest): HttpResponseInit {
   return json(request, 402, {
     error: 'payment_required',
-    message: '此信箱的首次免費額度已使用過囉！歡迎隨喜贊助取得一次性解鎖序號。',
+    message: '此信箱的首次免費額度已使用過囉！歡迎隨喜贊助取得解鎖序號。',
     portaly_url: portalyUrl()
+  });
+}
+
+function poolFullResponse(request: HttpRequest, kind: PoolKind, rem: PoolRemaining): HttpResponseInit {
+  const { free, vip } = poolLimits();
+  if (kind === 'free') {
+    return json(request, 429, {
+      error: 'free_pool_full',
+      message: `今日 ${free} 席免費名額已滿！持有贊助 / 活動序號者可使用 VIP 保留通道，或明日 00:00 再來 🌿`,
+      ...poolFields(rem)
+    });
+  }
+  return json(request, 429, {
+    error: 'token_limit_reached',
+    message: `感謝熱情支持！今日 ${free + vip} 席（含 ${vip} 席序號保留席）已全數額滿，明日 00:00 重置，序號會完整保留 🌿`,
+    ...poolFields(rem)
   });
 }
 
@@ -396,55 +420,69 @@ function otpErrorResponse(request: HttpRequest, result: Exclude<VerifyResult, { 
 
 async function handlePost(request: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
   const req = validate(await readJsonBody<PlanRequestBody>(request, 16 * 1024));
-  const limit = dailyLimit();
+  const dateKey = taipeiDateKey();
 
-  /* 1. 管理員通道（需 x-slowmate-admin = ADMIN_TOKEN）：不需 OTP、不扣名額、不需序號、無限次 */
+  /* 1. 管理員白名單（x-admin-secret = ADMIN_SECRET）：免 OTP、免序號、不受 50/80 席限制，只累計 vip_whitelist_used */
   const admin = adminStatus(request);
   if (admin === 'invalid') {
     return json(request, 401, { error: 'invalid_admin_token', message: '管理員金鑰無效。' });
   }
   if (admin === 'valid') {
+    let data: TripPlan;
     try {
-      const data = await generateTrip(req, context);
-      const used = await readCounter(COUNTER_KIND, taipeiDateKey());
-      return json(request, 200, { data, remaining_daily_quota: Math.max(0, limit - used), entitlement: 'admin' });
+      data = await generateTrip(req, context);
     } catch (err) {
       return generationErrorResponse(request, context, err);
     }
+    const counted = await reservePool(dateKey, 'whitelist').catch((err) => {
+      context.warn('[planTrip] vip_whitelist_used 統計失敗（不影響結果）', err);
+      return null;
+    });
+    const usage = counted?.usage ?? (await readPoolUsage(dateKey));
+    return json(request, 200, { data, entitlement: 'admin', ...poolFields(poolRemaining(usage)) });
   }
 
   /* 2. 資格判定（唯讀）
-   *   - 帶 otp_code 且仍有免費額度：驗 OTP → 優先用免費額度，若同時填了有效序號則保留不核銷（code_preserved）。
-   *   - 免費額度已用過：OTP 無意義，有有效序號就用序號，否則 402。
-   *   - 只帶序號：序號本身具唯一性，免 OTP 直接核銷序號；免費額度保留（free_quota_preserved）。
-   *   - 兩者皆無：免費額度已用過 → 402；否則 403 otp_required，前端改走 /api/send-otp。
+   *   - 帶 otp_code 且仍有免費資格：驗 OTP → 用免費席；若同時填了有效序號則保留不核銷（code_preserved）。
+   *   - 只帶序號：仍有免費資格且今日免費席未滿 → 403 reason=free_first，先驗 Email 用免費額度、序號保留；
+   *               否則直接核銷序號（免 OTP），免費席滿了就動用序號保留席。
+   *   - 兩者皆無：免費資格已用過 → 402；今日免費席已滿 → 429；否則 403 otp_required。
    */
   const profilesTable = await getTable(TABLES.UserProfiles);
   const profileRk = profileRowKey(req.email);
-  const profile = await getEntityOrNull<{ free_quota_used?: boolean; generation_count?: number }>(
-    profilesTable,
-    PROFILE_PK,
-    profileRk
-  );
+  const profile = await getEntityOrNull<{ free_quota_used?: boolean }>(profilesTable, PROFILE_PK, profileRk);
   const freeAvailable = profile?.free_quota_used !== true;
+  const rem = poolRemaining(await readPoolUsage(dateKey));
 
   let entitlement: Entitlement;
   let codePreserved = false;
   let freeQuotaPreserved = false;
 
-  if (req.otpCode && freeAvailable) {
+  if (req.otpCode && freeAvailable && (rem.free_remaining > 0 || !req.redeemCode)) {
+    if (rem.free_remaining === 0) return poolFullResponse(request, 'free', rem);
     const verified = await verifyOtp(req.email, req.otpCode);
     if (verified.status !== 'ok') return otpErrorResponse(request, verified);
     entitlement = 'free_quota';
-    codePreserved = !!req.redeemCode && (await inspectCode(req.redeemCode)) === 'unused';
+    codePreserved = !!req.redeemCode && (await inspectCode(req.redeemCode, req.email)).status === 'ok';
   } else if (req.redeemCode) {
-    // 認碼不認信箱：不比對 sponsor_email，任何信箱持有有效序號都可兌換
-    const state = await inspectCode(req.redeemCode);
-    if (state !== 'unused') return codeErrorResponse(request, state);
+    const check = await inspectCode(req.redeemCode, req.email);
+    if (check.status !== 'ok') return codeErrorResponse(request, check.status);
+    if (freeAvailable && rem.free_remaining > 0) {
+      // 免費額度優先保護：先用免費名額，序號一次都不扣
+      return json(request, 403, {
+        status: 'otp_required',
+        error: 'otp_required',
+        reason: 'free_first',
+        message: '你還有首次免費額度！驗證 Email 後會優先使用免費名額，序號完整保留給下次使用 🎁'
+      });
+    }
+    if (rem.code_total_remaining === 0) return poolFullResponse(request, 'code', rem);
     entitlement = 'redeem_code';
     freeQuotaPreserved = freeAvailable;
   } else if (!freeAvailable) {
     return paymentRequired(request);
+  } else if (rem.free_remaining === 0) {
+    return poolFullResponse(request, 'free', rem);
   } else {
     return json(request, 403, {
       status: 'otp_required',
@@ -453,37 +491,34 @@ async function handlePost(request: HttpRequest, context: InvocationContext): Pro
     });
   }
 
-  /* 3. 預扣每日全站名額（台灣時間） */
-  const dateKey = taipeiDateKey();
-  const reserved = await tryIncrementCounter(COUNTER_KIND, dateKey, limit);
-  if (!reserved.ok) {
-    return json(request, 429, {
-      error: 'token_limit_reached',
-      message: '感謝熱情支持！今日 50 個慢旅名額已滿，明日請早 🌿',
-      remaining_daily_quota: 0
-    });
-  }
+  /* 3. 預扣雙水池名額（ETag 樂觀鎖；記下實際扣到的欄位以便精準回滾） */
+  const poolKind: PoolKind = entitlement === 'redeem_code' ? 'code' : 'free';
+  const reserved = await reservePool(dateKey, poolKind);
+  if (!reserved.ok) return poolFullResponse(request, poolKind, poolRemaining(reserved.usage));
+  const poolField: PoolField = reserved.field;
 
-  /* 4. 鎖定資格（is_used / free_quota_used 仍為 false）
-   *   - 序號：status unused → processing，寫入 locked_at（ETag 防雙開分頁重複刷碼）
+  /* 4. 鎖定資格（尚未核銷）
+   *   - 序號：pending_locks 加入一把鎖、status → processing（ETag 防雙開分頁超額使用）
    *   - 免費額度：UserProfiles 租約
    */
   let release: () => Promise<void>;
+  let codeLockId = '';
   if (entitlement === 'redeem_code') {
-    const lock = await lockCode(req.redeemCode);
+    const lock = await lockCode(req.redeemCode, req.email);
     if (lock.status !== 'ok') {
-      await safeRollbackQuota(dateKey, context);
+      await safeReleasePool(dateKey, poolField, context);
       return codeErrorResponse(request, lock.status);
     }
+    codeLockId = lock.lockId;
     release = () => unlockCode(req.redeemCode, lock.lockId);
   } else {
     const lease = await acquireLease(TABLES.UserProfiles, PROFILE_PK, profileRk, 'free_quota_used', {
       email: req.email,
-      generation_count: 0,
+      total_trips: 0,
       created_at: new Date().toISOString()
     });
     if (lease.status !== 'ok') {
-      await safeRollbackQuota(dateKey, context);
+      await safeReleasePool(dateKey, poolField, context);
       if (lease.status === 'busy') {
         return json(request, 409, {
           error: 'entitlement_busy',
@@ -495,20 +530,21 @@ async function handlePost(request: HttpRequest, context: InvocationContext): Pro
     release = () => releaseLease(TABLES.UserProfiles, PROFILE_PK, profileRk, lease.leaseId);
   }
 
-  /* 5. 呼叫 Azure OpenAI gpt-4.1；失敗 → 回滾為 unused / 釋放租約 + 退回每日名額（零損耗，OTP 也保留可直接重試） */
+  /* 5. 呼叫 Azure OpenAI gpt-4.1；失敗 → 釋放鎖 / 租約 + 退回名額（零損耗，OTP 也保留可直接重試） */
   let data: TripPlan;
   try {
     data = await generateTrip(req, context);
   } catch (err) {
-    const results = await Promise.allSettled([release(), safeRollbackQuota(dateKey, context)]);
+    const results = await Promise.allSettled([release(), safeReleasePool(dateKey, poolField, context)]);
     results.forEach((r) => {
-      if (r.status === 'rejected') context.error('[planTrip] 回滾失敗（序號會在 3 分鐘後自動視為逾時可用）', r.reason);
+      if (r.status === 'rejected') context.error('[planTrip] 回滾失敗（序號鎖會在 3 分鐘後自動逾時）', r.reason);
     });
     return generationErrorResponse(request, context, err);
   }
 
   /* 6. AI 成功回傳合法 JSON → 正式核銷 */
   const nowIso = new Date().toISOString();
+  let codeRemainingUses: number | undefined;
   try {
     if (entitlement === 'free_quota') {
       await completeLease(TABLES.UserProfiles, PROFILE_PK, profileRk, (cur) => ({
@@ -516,14 +552,13 @@ async function handlePost(request: HttpRequest, context: InvocationContext): Pro
         free_quota_used: true,
         used_at: nowIso,
         email_verified_at: nowIso,
-        generation_count: (Number(cur.generation_count) || 0) + 1,
+        total_trips: tripCount(cur) + 1,
         last_generated_at: nowIso,
         last_destination: req.destination
       }));
       await consumeOtp(req.email).catch((err) => context.warn('[planTrip] OTP 作廢失敗（不影響結果）', err));
     } else {
-      await markCodeUsed(req.redeemCode, {
-        used_by_email: req.email,
+      codeRemainingUses = await markCodeUsed(req.redeemCode, codeLockId, req.email, {
         used_for_destination: req.destination
       });
       await recordProfileUsage(req.email, req.destination, nowIso, context);
@@ -535,24 +570,30 @@ async function handlePost(request: HttpRequest, context: InvocationContext): Pro
 
   return json(request, 200, {
     data,
-    remaining_daily_quota: Math.max(0, limit - reserved.used),
     entitlement,
     code_preserved: codePreserved,
-    free_quota_preserved: freeQuotaPreserved
+    free_quota_preserved: freeQuotaPreserved,
+    ...(codeRemainingUses !== undefined ? { code_remaining_uses: codeRemainingUses } : {}),
+    ...poolFields(poolRemaining(reserved.usage))
   });
+}
+
+/** total_trips（舊欄位 generation_count 相容） */
+function tripCount(e: Record<string, unknown> | null | undefined): number {
+  return Number(e?.total_trips ?? e?.generation_count) || 0;
 }
 
 async function recordProfileUsage(email: string, destination: string, nowIso: string, context: InvocationContext) {
   try {
     const table = await getTable(TABLES.UserProfiles);
     const rk = profileRowKey(email);
-    const cur = await getEntityOrNull<{ generation_count?: number }>(table, PROFILE_PK, rk);
+    const cur = await getEntityOrNull<Record<string, unknown>>(table, PROFILE_PK, rk);
     await table.upsertEntity(
       {
         partitionKey: PROFILE_PK,
         rowKey: rk,
         email,
-        generation_count: (Number(cur?.generation_count) || 0) + 1,
+        total_trips: tripCount(cur) + 1,
         last_generated_at: nowIso,
         last_destination: destination
       },
@@ -563,11 +604,11 @@ async function recordProfileUsage(email: string, destination: string, nowIso: st
   }
 }
 
-async function safeRollbackQuota(dateKey: string, context: InvocationContext) {
+async function safeReleasePool(dateKey: string, field: PoolField, context: InvocationContext) {
   try {
-    await decrementCounter(COUNTER_KIND, dateKey);
+    await releasePool(dateKey, field);
   } catch (err) {
-    context.error(`[planTrip] 名額回滾失敗 dateKey=${dateKey}`, err);
+    context.error(`[planTrip] 名額回滾失敗 dateKey=${dateKey} field=${field}`, err);
   }
 }
 

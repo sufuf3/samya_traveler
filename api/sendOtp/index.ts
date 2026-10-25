@@ -5,14 +5,15 @@ import { sendMail } from '../shared/mailer';
 import { OTP_RESEND_COOLDOWN_MS, OTP_TTL_MS, issueOtp, renderOtpEmail, rollbackIssuedOtp } from '../shared/otp';
 import {
   EMAIL_COUNTER,
-  PLAN_COUNTER,
   PROFILE_PK,
   TABLES,
   decrementCounter,
   getEntityOrNull,
   getTable,
+  poolLimits,
+  poolRemaining,
   profileRowKey,
-  readCounter,
+  readPoolUsage,
   taipeiDateKey,
   tryIncrementCounter
 } from '../shared/storage';
@@ -26,7 +27,7 @@ import {
  *   402 { error: 'payment_required', portaly_url }      此信箱已用過免費額度 → 不寄信
  *   429 { error: 'otp_cooldown', retry_after }          60 秒內已寄過
  *   429 { error: 'otp_daily_limit' }                    同一信箱今日寄送次數已達上限
- *   429 { error: 'token_limit_reached' }                今日全站 50 個名額已滿（不浪費驗證信）
+ *   429 { error: 'free_pool_full' }                     今日 50 席免費名額已滿（不浪費驗證信）
  *   429 { error: 'email_daily_cap' }                    今日 Gmail 寄信額度已滿
  *   502 { error: 'email_failed' }                       寄信失敗（已回復冷卻，可立即重試）
  */
@@ -51,18 +52,21 @@ export async function sendOtp(request: HttpRequest, context: InvocationContext):
     if (profile?.free_quota_used === true) {
       return json(request, 402, {
         error: 'payment_required',
-        message: '此信箱的首次免費額度已使用過囉！歡迎隨喜贊助取得一次性解鎖序號。',
+        message: '此信箱的首次免費額度已使用過囉！歡迎隨喜贊助取得解鎖序號。',
         portaly_url: process.env.PORTALY_URL || 'https://portaly.cc/samya_traveler'
       });
     }
 
-    // 今日全站名額已滿就不寄驗證信，避免浪費使用者時間與寄信額度
-    const limit = envInt('DAILY_GLOBAL_LIMIT', 50);
+    // 今日免費席已滿就不寄驗證信，避免浪費使用者時間與寄信額度（序號保留席不開放給免費試用）
     const dateKey = taipeiDateKey();
-    if ((await readCounter(PLAN_COUNTER, dateKey)) >= limit) {
+    const rem = poolRemaining(await readPoolUsage(dateKey));
+    if (rem.free_remaining === 0) {
       return json(request, 429, {
-        error: 'token_limit_reached',
-        message: '感謝熱情支持！今日 50 個慢旅名額已滿，明日請早 🌿',
+        error: 'free_pool_full',
+        message: `今日 ${poolLimits().free} 席免費名額已滿！持有贊助 / 活動序號者可使用 VIP 保留通道，或明日 00:00 再來 🌿`,
+        ...rem,
+        free_limit: poolLimits().free,
+        vip_limit: poolLimits().vip,
         remaining_daily_quota: 0
       });
     }

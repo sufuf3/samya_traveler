@@ -34,6 +34,8 @@ export interface TripPlan {
   trip_summary: {
     destination: string;
     theme_title: string;
+    /** AI 賦予的慢旅人格標籤，例如「🍵 古都老屋駐留者」 */
+    traveler_persona: string;
     vibe_description: string;
     svg_theme: SvgTheme;
     flight_card: {
@@ -143,6 +145,7 @@ export function sanitizeTrip(input: unknown, opts: SanitizeOptions = {}): TripPl
     trip_summary: {
       destination: destination || '慢旅',
       theme_title: str(summaryIn.theme_title, 120, `${destination || '慢旅'}・慢旅日誌`),
+      traveler_persona: str(summaryIn.traveler_persona, 30),
       vibe_description: str(summaryIn.vibe_description, 300),
       svg_theme,
       flight_card: {

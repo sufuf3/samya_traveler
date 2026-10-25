@@ -134,6 +134,7 @@ SETTINGS=(
   "MAIL_FROM_NAME=SlowMate 慢旅伴"
   "EMAIL_DAILY_CAP=400"
   "DAILY_GLOBAL_LIMIT=50"
+  "VIP_POOL_LIMIT=30"
   "PORTALY_URL=https://portaly.cc/samya_traveler"
   "ALLOWED_ORIGINS=$ALLOWED_ORIGIN,http://localhost:1313"
   "SLOWMATE_APP_URL=$ALLOWED_ORIGIN/slowmate/"
@@ -147,8 +148,8 @@ if ! has_setting GENERATE_CODE_SECRET; then
   SETTINGS+=("GENERATE_CODE_SECRET=$GENERATE_CODE_SECRET_NEW")
 fi
 has_setting OTP_SECRET || SETTINGS+=("OTP_SECRET=$(openssl rand -hex 32)")
-# 管理員金鑰（取代舊的 Email 白名單）：前端以 ?admin=<金鑰> 在自己的瀏覽器啟用一次
-has_setting ADMIN_TOKEN || SETTINGS+=("ADMIN_TOKEN=$(openssl rand -hex 32)")
+# 管理員金鑰（取代舊的 Email 白名單）：前端 ?admin=1 →「🔐 慢旅伴戰情室」輸入一次；舊名 ADMIN_TOKEN 仍可使用
+has_setting ADMIN_SECRET || has_setting ADMIN_TOKEN || SETTINGS+=("ADMIN_SECRET=$(openssl rand -hex 32)")
 
 az functionapp config appsettings set -n "$APP_NAME" -g "$RESOURCE_GROUP" -o none --settings "${SETTINGS[@]}"
 # 舊版的 Email 白名單已停用，確保不留在設定中
@@ -165,13 +166,13 @@ done
 say "建置並部署 api/"
 BUILD_DIR="$(mktemp -d)"
 trap 'rm -rf "$BUILD_DIR"' EXIT
-cp -r "$API_DIR"/{package.json,package-lock.json,host.json,tsconfig.json,shared,planTrip,sendOtp,checkCode,sendEmail,generateCode} "$BUILD_DIR"/
+cp -r "$API_DIR"/{package.json,package-lock.json,host.json,tsconfig.json,shared,planTrip,sendOtp,checkCode,sendEmail,generateCode,adminStats} "$BUILD_DIR"/
 (
   cd "$BUILD_DIR"
   npm ci --no-audit --no-fund
   npm run build
   npm prune --omit=dev --no-audit --no-fund
-  rm -rf shared planTrip sendOtp checkCode sendEmail generateCode tsconfig.json
+  rm -rf shared planTrip sendOtp checkCode sendEmail generateCode adminStats tsconfig.json
   zip -qr ../slowmate-api.zip .
 )
 az functionapp deployment source config-zip -n "$APP_NAME" -g "$RESOURCE_GROUP" --src "$BUILD_DIR/../slowmate-api.zip" -o none

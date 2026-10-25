@@ -20,10 +20,10 @@
 
 | 表 | PartitionKey | RowKey | 主要欄位 |
 |---|---|---|---|
-| `DailyUsage` | `Daily`（每日成功生成）/ `EmailDaily`（每日寄信封數） | 台灣日期 `YYYY-MM-DD` | `usedCount` |
-| `UserProfiles` | `User` | 小寫 email | `free_quota_used`、`used_at`、`generation_count` |
+| `DailyUsage` | `Daily`（雙水池名額）/ `EmailDaily`（每日寄信封數） | 台灣日期 `YYYY-MM-DD` | `Daily`：`free_used`（免費席 ≤ 50）、`code_used`（序號保留席 ≤ 30）、`vip_whitelist_used`（管理員，只統計）；`EmailDaily`：`usedCount` |
+| `UserProfiles` | `User` | 小寫 email | `free_quota_used`、`used_at`、`total_trips` |
 | `EmailOtps` | `OTP` | 小寫 email | `otp_hash`（不存明碼）、`expires_at`（10 分鐘）、`attempt_count`（最多 5 次）、`last_sent_at`（60 秒冷卻）、`send_day` / `send_count` |
-| `RedeemCodes` | `Code` | 序號（`trim().toUpperCase()`） | `is_used`、`status`（`unused` / `processing` / `used`）、`locked_at`、`sponsor_email`、`amount`、`tier`、`order_id`、`created_at`、`used_at` |
+| `RedeemCodes` | `Code` | 序號（`trim().toUpperCase()`，4~32 碼英數與 `-`） | `max_uses`、`used_count`、`is_used`、`allow_same_email`、`used_by_emails`（JSON 陣列）、`pending_locks`、`status`（`unused` / `processing` / `exhausted`）、`locked_at`、`campaign_tag`、`sponsor_email`、`amount`、`order_id`、`created_at`、`used_at` |
 
 Email 當 RowKey 時只會轉義 Table Storage 不允許的字元（`/ \ # ?`、控制字元與 `%`），一般信箱在 Portal 中可直接閱讀。
 
@@ -31,37 +31,72 @@ Email 當 RowKey 時只會轉義 Table Storage 不允許的字元（`/ \ # ?`、
 
 | 情況 | 行為 |
 |---|---|
-| 管理員模式（Header `x-slowmate-admin` = `ADMIN_TOKEN`） | 免 OTP、免序號、不扣每日名額；金鑰錯誤回 401。Email 本身不具任何特權 |
-| 只帶有效序號 | 免 OTP，直接核銷序號（認碼不認信箱）；若免費額度未用過，回傳 `free_quota_preserved: true` |
-| 帶 `otp_code` 且免費額度未用過 | 驗證 OTP → 使用免費額度；若同時帶有效序號，序號不核銷並回傳 `code_preserved: true` |
+| 管理員白名單（Header `x-admin-secret` = `ADMIN_SECRET`） | 免 OTP、免序號、不受 50/80 席限制，只累計 `vip_whitelist_used`；金鑰錯誤回 401。Email 本身不具任何特權 |
+| 帶 `otp_code` 且免費額度未用過 | 驗證 OTP → 使用免費席；若同時帶有效序號，序號不扣次數並回傳 `code_preserved: true` |
+| 只帶有效序號、免費額度未用過且今日免費席未滿 | 403 `otp_required`、`reason: "free_first"`：先驗 Email 用免費名額，序號保留（免費額度優先保護） |
+| 只帶有效序號（其他情況） | 免 OTP，核銷序號；免費席未滿先扣免費席，滿了才扣序號保留席；回傳 `code_remaining_uses` |
 | 免費額度已用過、沒有有效序號 | 402 `payment_required` |
+| 今日免費席已滿、沒有序號 | 429 `free_pool_full`（`/api/send-otp` 也會回 429，不寄信） |
+| 免費席 + 序號保留席全滿 | 429 `token_limit_reached` |
 | 免費額度未用過、沒帶 OTP 也沒帶序號 | 403 `otp_required`（前端改呼叫 `/api/send-otp`） |
+
+### 雙水池每日名額
+
+以台灣時間計算，每日 00:00 重置。`GET /api/plan` 回傳：
+
+```json
+{ "free_remaining": 50, "vip_pool_remaining": 30, "code_total_remaining": 80 }
+```
+
+- 免費席（`FREE_DAILY_LIMIT`，未設定時沿用 `DAILY_GLOBAL_LIMIT`，預設 50）：首次免費試用者只能用這一池。
+- 序號保留席（`VIP_POOL_LIMIT`，預設 30）：持序號者先用免費席，免費席滿了才動用保留席，所以序號者每日最多可兌換 80 席。
+- 預扣時記下實際扣到的欄位；AI 生成失敗時只把那一席還回去，序號 `used_count` 與免費資格都不動（零損耗）。
+
+### 多次數序號
+
+| 用途 | `max_uses` | `allow_same_email` | `campaign_tag` |
+|---|---|---|---|
+| Portaly 贊助（`/api/generateCode`） | 依金額 `SPONSOR_MAX_USES`，預設 1 | `true` | `PORTALY` |
+| Reels 抽獎閨蜜包 | 10 | `true` | `REELS_GIVEAWAY` |
+| KOC 專屬粉絲碼 | 50 / 80 | `false`（每個信箱限用 1 次） | `KOC_<名字>` |
+| 聖誕福袋公用碼 | 3 | `false` | `XMAS` |
+
+同一組序號可以多人同時使用：每次生成在 `pending_locks` 各持有一把鎖，`used_count + 進行中的鎖 < max_uses` 才能再鎖，超過 3 分鐘的鎖自動失效。
+`allow_same_email = false` 時，同一信箱第二次使用回 400：「此活動專屬序號每個信箱限體驗一次喔！」。
+舊版一次性序號（只有 `is_used` / `status: "used"`）自動視為 `max_uses = 1`。
 
 OTP 錯誤會回 400，`error` 為 `invalid_otp`（附 `attempts_left`）、`otp_expired`、`otp_locked` 或 `otp_missing`。
 OTP 只有在行程「成功生成」後才作廢；AI 生成失敗時，10 分鐘內可用同一組驗證碼重試。
 
 `/api/send-otp` 會先擋拋棄式信箱（400 `disposable_email`，清單在 `shared/disposable.ts`，可用 `DISPOSABLE_EXTRA_DOMAINS` 追加）。
-若該信箱已用過免費額度，會直接回 402、不寄信；今日全站名額已滿時回 429、不寄信。
+若該信箱已用過免費額度，會直接回 402、不寄信；今日免費席已滿時回 429 `free_pool_full`、不寄信。
 
 ## 管理員模式
 
 管理員不再以 Email 白名單判斷（Email 會出現在公開的前端原始碼，任何人輸入即可無限免費使用）。改為：
 
-1. 後端 App Setting `ADMIN_TOKEN`（至少 32 字元的隨機字串，在 Azure Portal → `slowmate-api` → Environment variables 查看）。
-2. 在自己的瀏覽器開啟一次 `https://samya-traveler.github.io/slowmate/?admin=<ADMIN_TOKEN>`：
-   金鑰只存在該瀏覽器的 localStorage，網址參數會立即被移除，之後的 `/api/plan` 請求會帶上 `x-slowmate-admin` header。
-3. 關閉：開啟 `…/slowmate/?admin=off`。金鑰錯誤時後端回 401，前端會自動清除本機金鑰。
-4. 金鑰外洩時，直接在 Portal 換一組新的 `ADMIN_TOKEN`，舊金鑰立即失效。
+1. 後端 App Setting `ADMIN_SECRET`（至少 32 字元的隨機字串；舊名 `ADMIN_TOKEN` 仍可使用，在 Azure Portal → `slowmate-api` → Environment variables 查看）。
+2. 開啟 `https://samya-traveler.github.io/slowmate/?admin=1` → 點「🔐 慢旅伴戰情室」→ 輸入金鑰：
+   金鑰只存在該瀏覽器的 localStorage，之後的 `/api/plan` 請求會帶上 `x-admin-secret` header（白名單：免 OTP、不受名額限制）。
+3. 關閉：戰情室內按「登出」，或開啟 `…/slowmate/?admin=off`。金鑰錯誤時後端回 401，前端會自動清除本機金鑰。
+4. 金鑰外洩時，直接在 Portal 換一組新的 `ADMIN_SECRET`，舊金鑰立即失效。
+
+### 戰情室 API（`/api/adminStats`，Header `x-admin-secret`）
+
+- `GET`：今日雙水池用量、近 7 日趨勢、用戶總數、各 `campaign_tag` 核銷統計與序號核銷排行榜（前 20 名）。
+- `POST`：批次產生行銷序號，回傳序號與 Magic Link（`…/slowmate/?code=…`）。
+  - 隨機批次：`{ "mode": "random", "count": 20, "max_uses": 1, "prefix": "REELS", "allow_same_email": false, "campaign_tag": "REELS_GIVEAWAY" }`
+  - 指定代碼：`{ "mode": "custom", "code": "NANA-SLOW", "max_uses": 50, "allow_same_email": false, "campaign_tag": "KOC_NANA" }`（代碼已存在回 409，不會覆寫）
 
 ## 序號狀態機（零損耗回滾）
 
 邏輯集中在 `shared/redeemCodes.ts`，所有寫入都帶 ETag 樂觀鎖：
 
-1. 收到序號 → 不存在或已使用回 400；`status = "processing"` 且 `locked_at` 未滿 3 分鐘回 409 `code_processing`。
-2. 預扣每日名額（額滿回 429，序號完全沒被動到）。
-3. 把序號改為 `status = "processing"`、寫入 `locked_at`。雙開分頁同時送出時只有一個請求拿得到鎖，另一個回 409。
-4. 呼叫 gpt-4.1：成功回傳合法 JSON → `is_used = true`、`status = "used"`、寫入 `used_at`；失敗 → 回滾為 `is_used = false`、`status = "unused"`，並退回每日名額。
-5. 若 Function 在生成中途當掉沒能回滾，超過 3 分鐘的 `processing` 會被視為逾時，可以重新使用。
+1. 收到序號 → 不存在、次數用完或此信箱已用過（`allow_same_email = false`）回 400；剩餘次數都在生成中回 409 `code_processing`。
+2. 預扣雙水池名額（額滿回 429，序號完全沒被動到）。
+3. 在 `pending_locks` 加入一把鎖、`status = "processing"`。雙開分頁同時送出時，超過剩餘次數的請求回 409。
+4. 呼叫 gpt-4.1：成功回傳合法 JSON → `used_count + 1`、信箱加入 `used_by_emails`，用完時 `is_used = true`、`status = "exhausted"`，否則回到 `unused`；失敗 → 只移除自己那把鎖，並退回名額。
+5. 若 Function 在生成中途當掉沒能回滾，超過 3 分鐘的鎖會被視為逾時，次數自動回來。
 
 免費額度走相同流程（`UserProfiles` 的租約），失敗時一樣不會被消耗。
 
@@ -72,9 +107,9 @@ OTP 只有在行程「成功生成」後才作廢；AI 生成失敗時，10 分�
 | 200 | 成功 |
 | 400 | `invalid_input`、`invalid_code`、OTP 錯誤、`disposable_email` |
 | 402 | `payment_required` |
-| 403 | `otp_required` |
+| 403 | `otp_required`（`reason: "free_first"` 表示先用免費額度、序號保留） |
 | 409 | 序號或免費額度正在另一個視窗生成中 |
-| 429 | `token_limit_reached`、`otp_cooldown`、`email_daily_cap` |
+| 429 | `free_pool_full`、`token_limit_reached`、`otp_cooldown`、`email_daily_cap` |
 | 502 / 504 | AI 生成或寄信失敗（已全數回滾） |
 
 ## AI 模型：Azure OpenAI gpt-4.1
@@ -112,14 +147,16 @@ OTP 只有在行程「成功生成」後才作廢；AI 生成失敗時，10 分�
 | `GMAIL_APP_PASSWORD` | Google 應用程式密碼（必填，否則無法寄信） |
 | `GENERATE_CODE_SECRET` | 與 Logic App 共用的長隨機字串 |
 | `OTP_SECRET` | OTP 雜湊用的 pepper，建議另設一組長隨機字串 |
-| `ADMIN_TOKEN` | 管理員金鑰（至少 32 字元，建議 `openssl rand -hex 32`）；未設定時管理員模式一律拒絕 |
+| `ADMIN_SECRET` | 管理員金鑰（至少 32 字元，建議 `openssl rand -hex 32`；舊名 `ADMIN_TOKEN` 仍可使用）；未設定時管理員模式與戰情室一律拒絕，也可用於 `/api/generateCode` 認證 |
 | `ALLOWED_ORIGINS` | 預設 `https://samya-traveler.github.io` |
 
 選填項目：
 
 | 變數 | 預設值 |
 |---|---|
-| `DAILY_GLOBAL_LIMIT` | 50 |
+| `FREE_DAILY_LIMIT`（舊名 `DAILY_GLOBAL_LIMIT`） | 50（每日免費席） |
+| `VIP_POOL_LIMIT` | 30（每日序號保留席） |
+| `SPONSOR_MAX_USES` | 空（所有贊助金額 1 次）；例 `88:1,150:3,300:5` |
 | `EMAIL_DAILY_CAP` | 400 |
 | `AI_TIMEOUT_MS` | 120000 |
 | `MAIL_FROM_NAME` / `MAIL_REPLY_TO` | `SlowMate 慢旅伴` / 空 |
