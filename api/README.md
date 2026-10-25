@@ -81,7 +81,9 @@ OTP 只有在行程「成功生成」後才作廢；AI 生成失敗時，10 分�
 3. 關閉：戰情室內按「登出」，或開啟 `…/slowmate/?admin=off`。金鑰錯誤時後端回 401，前端會自動清除本機金鑰。
 4. 金鑰外洩時，直接在 Portal 換一組新的 `ADMIN_SECRET`，舊金鑰立即失效。
 
-### 戰情室 API（`/api/adminStats`，Header `x-admin-secret`）
+### 戰情室 API（`/api/dashboard-stats`，Header `x-admin-secret`）
+
+函式名稱為 `adminStats`，但路由不能用 `/api/adminStats`：Azure Functions 保留以 `admin` 開頭的路由給主機管理 API，會直接回 404。
 
 - `GET`：今日雙水池用量、近 7 日趨勢、用戶總數、各 `campaign_tag` 核銷統計與序號核銷排行榜（前 20 名）。
 - `POST`：批次產生行銷序號，回傳序號與 Magic Link（`…/slowmate/?code=…`）。

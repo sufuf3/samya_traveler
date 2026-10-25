@@ -30,13 +30,15 @@ import {
 /**
  * 管理員戰情室（Header x-admin-secret = App Setting ADMIN_SECRET）
  *
- * GET  /api/adminStats
+ * 路由為 /api/dashboard-stats：Azure Functions 保留以 admin 開頭的路由給主機管理 API，/api/adminStats 會被擋成 404。
+ *
+ * GET  /api/dashboard-stats
  *   { date_key, today: { free_used, free_limit, code_used, vip_limit, vip_whitelist_used, ...剩餘名額 },
  *     trend: 近 7 日 [{ date, free_used, code_used, vip_whitelist_used, total }],
  *     total_users, free_trial_users, emails_sent_today,
  *     total_codes, campaigns: 各 campaign_tag 核銷統計, top_codes: 序號核銷排行榜 }
  *
- * POST /api/adminStats   批次產生行銷序號
+ * POST /api/dashboard-stats   批次產生行銷序號
  *   隨機批次：{ mode: 'random', count: 20, max_uses: 1, prefix: 'REELS', allow_same_email: false, campaign_tag: 'REELS_GIVEAWAY' }
  *   指定代碼：{ mode: 'custom', code: 'NANA-SLOW', max_uses: 50, allow_same_email: false, campaign_tag: 'KOC_NANA' }
  *   201 { codes: [{ code, magic_link, max_uses, allow_same_email, campaign_tag }] }
@@ -208,7 +210,7 @@ export async function adminStats(request: HttpRequest, context: InvocationContex
 }
 
 app.http('adminStats', {
-  route: 'adminStats',
+  route: 'dashboard-stats',
   methods: ['GET', 'POST', 'OPTIONS'],
   authLevel: 'anonymous',
   handler: adminStats

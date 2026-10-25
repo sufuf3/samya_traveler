@@ -247,7 +247,7 @@ export const CODE_MESSAGES: Record<CodeProblem, string> = {
 };
 
 /* ------------------------------------------------------------------ */
-/* 發碼（Portaly 贊助 /api/generateCode 與管理員戰情室 /api/adminStats 共用） */
+/* 發碼（Portaly 贊助 /api/generateCode 與管理員戰情室 /api/dashboard-stats 共用） */
 /* ------------------------------------------------------------------ */
 
 /** 隨機序號字元：排除易混淆的 0/O、1/I/L */
