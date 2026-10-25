@@ -47,8 +47,8 @@ const C = {
 const PORTALY_URL = () => process.env.PORTALY_URL || 'https://portaly.cc/samya_traveler';
 const APP_URL = () => process.env.SLOWMATE_APP_URL || 'https://samya-traveler.github.io/slowmate/';
 
-const CTA_FORWARD = '💌 喜歡這份慢旅行程嗎？歡迎直接將這封信轉寄給你的旅伴一起討論！';
-const CTA_REVISIT = '☕ 出發前行程有變動嗎？買杯 NT$88 的咖啡支持獨立開發，就能獲得新序號重新微調行程喔！';
+const ctaText = (portalyUrl: string) =>
+  `💌 喜歡這份慢旅行程嗎？歡迎直接轉寄給旅伴一起討論！出發前若行程有變動，買杯 NT$88 的咖啡支持獨立開發（ ${portalyUrl} ），就能在 1~3 分鐘內收到新序號重新微調行程喔！`;
 
 /** 轉寄給旅伴 + 回訪 / 贊助鉤子（放在頁尾上方） */
 function ctaBlock(): string {
@@ -58,8 +58,10 @@ function ctaBlock(): string {
         <tr><td style="padding:0 16px 16px;">
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#FFF6E9;border:1px solid #F2D7A9;border-radius:16px;">
             <tr><td style="padding:18px 18px 14px;font-size:14px;line-height:1.8;color:${C.text};">
-              <div style="margin-bottom:8px;">${escapeHtml(CTA_FORWARD)}</div>
-              <div>${escapeHtml(CTA_REVISIT)}</div>
+              ${escapeHtml(ctaText(PORTALY_URL())).replace(
+                escapeHtml(PORTALY_URL()),
+                `<a href="${escapeHtml(PORTALY_URL())}" target="_blank" style="color:${C.coral};font-weight:700;text-decoration:underline;">${escapeHtml(PORTALY_URL())}</a>`
+              )}
             </td></tr>
             <tr><td align="center" style="padding:0 14px 18px;">
               ${btn(PORTALY_URL(), '❤️ 贊助獲得新序號', C.coral, '#FFFFFF', C.coral)}
@@ -259,7 +261,7 @@ function renderText(trip: TripPlan): string {
     lines.push('');
   }
   lines.push(SLOW_TRAVEL_NOTE_TITLE, SLOW_TRAVEL_NOTE_BODY, '');
-  lines.push(CTA_FORWARD, CTA_REVISIT, `• 贊助獲得新序號：${PORTALY_URL()}`, `• 回到 SlowMate 規劃：${APP_URL()}`, '');
+  lines.push(ctaText(PORTALY_URL()), `• 回到 SlowMate 規劃：${APP_URL()}`, '');
   lines.push('— SlowMate 慢旅伴｜AI 慢旅行程規劃師 · https://samya-traveler.github.io/slowmate/');
   return lines.join('\n');
 }
