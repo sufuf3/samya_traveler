@@ -2,7 +2,7 @@ import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/fu
 import { BadRequestError, envInt, json, normalizeEmail, preflight, readJsonBody } from '../shared/http';
 import { SLOW_TRAVEL_NOTE_BODY, SLOW_TRAVEL_NOTE_TITLE, escapeHtml, sendMail } from '../shared/mailer';
 import { EMAIL_COUNTER, decrementCounter, taipeiDateKey, tryIncrementCounter } from '../shared/storage';
-import { TripPlan, TripValidationError, googleMapsUrl, sanitizeTrip } from '../shared/trip';
+import { TripPlan, TripValidationError, arrivalNote, departureNote, googleMapsUrl, sanitizeTrip } from '../shared/trip';
 
 /**
  * POST /api/send-email
@@ -91,12 +91,14 @@ function renderHtml(trip: TripPlan): string {
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
       <tr><td style="background:${C.bg};border-left:4px solid ${C.sage};border-radius:10px;padding:12px 14px;">
         <div style="font-size:12px;font-weight:700;color:${C.sageDark};letter-spacing:1px;">OUTBOUND 去程建議</div>
-        <div style="font-size:14px;color:${C.muted};line-height:1.6;">${escapeHtml(s.flight_card.outbound_hint || '建議提早抵達機場辦理登機。')}</div>
+        <div style="font-size:14px;color:${C.muted};line-height:1.6;">${escapeHtml(s.flight_card.outbound_hint || '建議提早抵達機場辦理登機。')}</div>${s.arrival_time ? `
+        <div style="font-size:13px;color:${C.sageDark};font-weight:700;line-height:1.6;margin-top:6px;">🛬 ${escapeHtml(arrivalNote(s.arrival_time))}</div>` : ''}
       </td></tr>
       <tr><td style="height:10px;line-height:10px;font-size:0;">&nbsp;</td></tr>
       <tr><td style="background:${C.bg};border-left:4px solid ${C.sage};border-radius:10px;padding:12px 14px;">
         <div style="font-size:12px;font-weight:700;color:${C.sageDark};letter-spacing:1px;">INBOUND 回程提醒</div>
-        <div style="font-size:14px;color:${C.muted};line-height:1.6;">${escapeHtml(s.flight_card.inbound_hint || '回程預留充裕時間通關。')}</div>
+        <div style="font-size:14px;color:${C.muted};line-height:1.6;">${escapeHtml(s.flight_card.inbound_hint || '回程預留充裕時間通關。')}</div>${s.departure_time ? `
+        <div style="font-size:13px;color:${C.sageDark};font-weight:700;line-height:1.6;margin-top:6px;">🛫 ${escapeHtml(departureNote(s.departure_time))}</div>` : ''}
       </td></tr>
     </table>`;
 
@@ -232,7 +234,9 @@ function renderText(trip: TripPlan): string {
     s.vibe_description,
     '----------------------------------------',
     `✈️ 去程：${s.flight_card.outbound_hint}`,
+    ...(s.arrival_time ? [`🛬 ${arrivalNote(s.arrival_time)}`] : []),
     `✈️ 回程：${s.flight_card.inbound_hint}`,
+    ...(s.departure_time ? [`🛫 ${departureNote(s.departure_time)}`] : []),
     ''
   ];
   if (prep.transport_passes.length) {

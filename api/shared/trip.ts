@@ -42,6 +42,10 @@ export interface TripPlan {
       outbound_hint: string;
       inbound_hint: string;
     };
+    /** 使用者選填的抵達時間（例：14:30、下午）；由後端依請求寫入，不是 AI 產生 */
+    arrival_time?: string;
+    /** 使用者選填的離境/離開時間（例：18:00、晚上）；由後端依請求寫入 */
+    departure_time?: string;
   };
   pre_trip_prep: {
     transport_passes: { name: string; description: string; buy_timing: string }[];
@@ -71,6 +75,15 @@ function str(v: unknown, max: number, fallback = ''): string {
 
 function arr(v: unknown, max: number): unknown[] {
   return Array.isArray(v) ? v.slice(0, max) : [];
+}
+
+/** 選填抵達 / 離開時間：最多 20 字，空值不輸出欄位 */
+export const TRAVEL_TIME_MAX = 20;
+
+function optionalTimes(summary: Record<string, unknown>): { arrival_time?: string; departure_time?: string } {
+  const arrival = str(summary.arrival_time, TRAVEL_TIME_MAX);
+  const departure = str(summary.departure_time, TRAVEL_TIME_MAX);
+  return { ...(arrival ? { arrival_time: arrival } : {}), ...(departure ? { departure_time: departure } : {}) };
 }
 
 export interface SanitizeOptions {
@@ -151,7 +164,9 @@ export function sanitizeTrip(input: unknown, opts: SanitizeOptions = {}): TripPl
       flight_card: {
         outbound_hint: str(flightIn.outbound_hint, 300),
         inbound_hint: str(flightIn.inbound_hint, 300)
-      }
+      },
+      // 只有寬鬆模式（寄信時由前端帶回）才保留；AI 輸出一律以後端收到的請求為準
+      ...(opts.lenient ? optionalTimes(summaryIn) : {})
     },
     pre_trip_prep: {
       transport_passes: arr(prepIn.transport_passes, 8).map((p) => {
@@ -187,4 +202,13 @@ export function listTripDates(start: string, end: string): string[] | null {
 
 export function googleMapsUrl(title: string, destination: string): string {
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${title} ${destination}`)}`;
+}
+
+/** 結果頁 / 行程信的首末日調整提示（前端 index.html 使用相同文字） */
+export function arrivalNote(time: string): string {
+  return `首日預計於 ${time} 抵達，已為您調整當日漫步節奏`;
+}
+
+export function departureNote(time: string): string {
+  return `末日預計於 ${time} 離開，已為您預留散步、採買與前往機場 / 車站的時間`;
 }
