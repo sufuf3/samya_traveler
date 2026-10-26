@@ -3,7 +3,7 @@ import { BadRequestError, envInt, json, normalizeEmail, preflight, readJsonBody 
 import { BRAND_NAME, SLOW_TRAVEL_NOTE_BODY, SLOW_TRAVEL_NOTE_TITLE, escapeHtml, sendMail } from '../shared/mailer';
 import { promoMode } from '../shared/plans';
 import { EMAIL_COUNTER, decrementCounter, taipeiDateKey, tryIncrementCounter } from '../shared/storage';
-import { TripPlan, TripValidationError, arrivalNote, departureNote, googleMapsUrl, sanitizeTrip } from '../shared/trip';
+import { TripPlan, TripValidationError, applyDepartureCutoff, arrivalNote, departureNote, googleMapsUrl, sanitizeTrip } from '../shared/trip';
 
 /**
  * POST /api/send-email
@@ -296,7 +296,7 @@ export async function sendEmail(request: HttpRequest, context: InvocationContext
 
     let trip: TripPlan;
     try {
-      trip = sanitizeTrip(body.itinerary_data, { lenient: true });
+      trip = applyDepartureCutoff(sanitizeTrip(body.itinerary_data, { lenient: true }));
     } catch (err) {
       if (err instanceof TripValidationError) throw new BadRequestError(`行程資料格式不正確：${err.message}`);
       throw err;

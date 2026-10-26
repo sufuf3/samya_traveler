@@ -29,7 +29,17 @@ import {
 } from '../shared/storage';
 import { VerifyResult, consumeOtp, normalizeOtpInput, verifyOtp } from '../shared/otp';
 import { CODE_MESSAGES, CODE_RE, CodeProblem, cleanCode, inspectCode, lockCode, markCodeUsed, unlockCode } from '../shared/redeemCodes';
-import { MAX_TRIP_DAYS, TRAVEL_TIME_MAX, TripPlan, TripValidationError, listTripDates, sanitizeTrip } from '../shared/trip';
+import {
+  DepartureBucket,
+  MAX_TRIP_DAYS,
+  TRAVEL_TIME_MAX,
+  TripPlan,
+  TripValidationError,
+  applyDepartureCutoff,
+  departureBucket,
+  listTripDates,
+  sanitizeTrip
+} from '../shared/trip';
 
 /**
  * GET  /api/plan  → 今日（台灣時間）雙水池名額 { free_remaining, vip_pool_remaining, code_total_remaining }
@@ -178,8 +188,8 @@ function seasonHint(startDate: string): SeasonHint {
 function buildSystemPrompt(dayCount: number, season: SeasonHint): string {
   const density =
     dayCount <= 5
-      ? `【行程密度：1~5 天，精緻節奏】每天的 timeline 必須「剛好 3 個」時段，time_slot 依序為「上午」、「下午」、「傍晚」。每個 description 約 50~90 字，寫出光線、氣味與街角的氛圍，並在句尾以括號註明建議停留時間，例如（建議停留 2 小時）。`
-      : `【行程密度：6~14 天，定點慢活節奏】每天的 timeline 必須「剛好 2 個」時段，time_slot 依序為「上午」、「下午」，不要安排傍晚。文字務必精簡：day_title 15 字內、title 20 字內、description 45 字內並以括號註明建議停留時間。pre_trip_prep 各清單最多 4 項。這是為了確保整份 JSON 完整輸出不被截斷。`;
+      ? `【行程密度：1~5 天，精緻節奏】每天的 timeline 必須「剛好 3 個」時段，time_slot 依序為「上午」、「下午」、「傍晚」（首日 / 末日受抵達、離境時間影響時例外，以上方的時間感知與末日切斷規則為準）。每個 description 約 50~90 字，寫出光線、氣味與街角的氛圍，並在句尾以括號註明建議停留時間，例如（建議停留 2 小時）。`
+      : `【行程密度：6~14 天，定點慢活節奏】每天的 timeline 必須「剛好 2 個」時段，time_slot 依序為「上午」、「下午」，不要安排傍晚（首日 / 末日受抵達、離境時間影響時例外，以上方規則為準）。文字務必精簡：day_title 15 字內、title 20 字內、description 45 字內並以括號註明建議停留時間。pre_trip_prep 各清單最多 4 項。這是為了確保整份 JSON 完整輸出不被截斷。`;
 
   return `你是「SlowMate · AI 慢旅行程規劃助手」，熟悉在地交通與生活感，服務對象是來自台灣、喜歡留白與散步的旅人。
 
@@ -207,6 +217,10 @@ ${season.guidance}
 使用者可能提供了選填的【抵達時間 (arrival_time)】與【離境/離開時間 (departure_time)】。請嚴格根據這兩個時間調整「Day 1（首日）」與「最後一日（末日）」的時段安排：
 - 若抵達時間較晚（例如傍晚或晚上），Day 1 絕對不可安排白天或早上的遠程戶外景點，應調整為「機場/車站移動、飯店入住、周邊巷弄晚餐、深夜喫茶店」等輕量散步；
 - 若離境/離開時間較早（例如中午或下午），最後一日應調整為「飯店周邊散步、伴手禮採買、前往機場/車站」；
+- 【末日時間軸切斷規則】請嚴格根據使用者的離境/離開時間來決定最後一日（daily_itinerary 最後一天）的時段數量與內容（使用者訊息中會附上後端判定的離境時段）：
+  1. 若離境時間為「上午」（或早於 12:00）：最後一日的行程只能有「上午」這單一或最多兩個時段，絕對禁止出現下午或傍晚的行程；該上午的行程直接整合為「晨間散步與伴手禮採買 ➔ 前往機場/車站 ➔ 搭機/搭車返程」，將所有動線收斂在上午完成。
+  2. 若離境時間為「下午」（12:00 - 17:00）：可安排「上午」與「下午」兩個時段，下午時段直接對應前往機場/車站與離境，不可再有傍晚。
+  3. 若離境時間為「晚上」（晚於 17:00）：允許安排「上午」與「下午」時段，傍晚才作為離境返程。
 - 若未填寫，則維持預設的流暢日系散策節奏。
 - 受影響的首日 / 末日可以只排抵達之後或離開之前的時段：timeline 至少 1 個，time_slot 可改用「抵達後」「晚上」「深夜」「出發前」等貼切的說法，不必湊滿下方規定的數量；抵達時間之前、離開時間之後都不可安排任何行程。
 - 若只有 1 天，同一天必須同時符合抵達與離開時間。
@@ -221,23 +235,34 @@ ${density}
 }
 
 /** 使用者輸入的抵達 / 離開時間視為資料，以標籤包起來，不是指令 */
+const DEPARTURE_RULE: Record<DepartureBucket, string> = {
+  morning: '上午（早於 12:00）→ 最後一日只能有 1~2 個「上午」時段，整合晨間散步、伴手禮採買、前往機場/車站與返程，禁止下午與傍晚',
+  afternoon: '下午（12:00 - 17:00）→ 最後一日最多「上午」「下午」兩個時段，下午即前往機場/車站與離境，禁止傍晚',
+  evening: '晚上（晚於 17:00）→ 最後一日可安排「上午」「下午」，傍晚作為離境返程'
+};
+
 function travelTimeLines(req: ValidatedRequest): string {
   const last = req.dates.length;
+  const bucket = departureBucket(req.departureTime);
   return `抵達時間（Day 1，${req.dates[0]}）：<arrival_time>${req.arrivalTime || '未填寫'}</arrival_time>
 離境/離開時間（Day ${last}，${req.dates[last - 1]}）：<departure_time>${req.departureTime || '未填寫'}</departure_time>
-`;
+${bucket ? `離境時段判定（Day ${last}）：${DEPARTURE_RULE[bucket]}
+` : ''}`;
 }
 
-/** 把使用者填的時間寫回 trip_summary，結果頁與行程信可據此顯示首末日調整提示 */
+/**
+ * 把使用者填的時間寫回 trip_summary（結果頁與行程信據此顯示首末日調整提示），
+ * 並依離境時間刪掉末日離開之後的時段（AI 偶爾仍會照每日 3 個時段的密度規則排滿）。
+ */
 function withTravelTimes(trip: TripPlan, req: ValidatedRequest): TripPlan {
-  return {
+  return applyDepartureCutoff({
     ...trip,
     trip_summary: {
       ...trip.trip_summary,
       ...(req.arrivalTime ? { arrival_time: req.arrivalTime } : {}),
       ...(req.departureTime ? { departure_time: req.departureTime } : {})
     }
-  };
+  });
 }
 
 function buildUserPrompt(req: ValidatedRequest, season: SeasonHint): string {

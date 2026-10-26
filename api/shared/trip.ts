@@ -212,3 +212,65 @@ export function arrivalNote(time: string): string {
 export function departureNote(time: string): string {
   return `末日預計於 ${time} 離開，已為您預留散步、採買與前往機場 / 車站的時間`;
 }
+
+/* ------------------------------------------------------------------ */
+/* 末日時間軸切斷：依離境 / 離開時間刪掉離開之後的時段                         */
+/* （前端 index.html 的 departureBucket / applyDepartureCutoff 使用相同規則）  */
+/* ------------------------------------------------------------------ */
+
+export type DepartureBucket = 'morning' | 'afternoon' | 'evening';
+
+/**
+ * 「09:30」「9點」「下午3點」「3pm」「上午」「晚上」… → 早於 12:00 為 morning、12:00~17:00 為 afternoon、晚於 17:00 為 evening。
+ * 無法判斷時回傳 null（維持 AI 原本的安排）。
+ */
+export function departureBucket(raw: string | undefined): DepartureBucket | null {
+  const text = String(raw ?? '')
+    .replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0))
+    .replace(/：/g, ':')
+    .toLowerCase()
+    .trim();
+  if (!text) return null;
+  const pm = /下午|午後|傍晚|晚上|晚間|夜|pm/.test(text);
+  const m = text.match(/(\d{1,2})\s*(?::|點|时|時|h)\s*(\d{1,2})?/) || text.match(/(\d{1,2})\s*(?:am|pm)/) || text.match(/^(\d{1,2})$/);
+  if (m) {
+    let hour = Number(m[1]);
+    const minute = m[2] !== undefined ? Number(m[2]) || 0 : /\d\s*[點時时]半/.test(text) ? 30 : 0;
+    if (pm && hour < 12) hour += 12;
+    if (/凌晨|am/.test(text) && hour === 12) hour = 0;
+    if (hour <= 24) {
+      const t = hour * 60 + minute;
+      return t < 12 * 60 ? 'morning' : t <= 17 * 60 ? 'afternoon' : 'evening';
+    }
+  }
+  if (/午前|凌晨|清晨|一早|早上|早晨|上午|morning/.test(text)) return 'morning';
+  if (/中午|午後|下午|afternoon|noon/.test(text)) return 'afternoon';
+  if (/傍晚|晚上|晚間|夜|evening|night/.test(text)) return 'evening';
+  return null;
+}
+
+/** 離境時段之後不該出現的 time_slot */
+const SLOT_AFTER: Record<DepartureBucket, RegExp | null> = {
+  morning: /中午|午後|下午|傍晚|黃昏|晚|夜/,
+  afternoon: /傍晚|黃昏|晚|夜/,
+  evening: null
+};
+
+/**
+ * 末日只保留離開之前的時段：上午離境 → 最多 2 個且不得有下午 / 傍晚；下午離境 → 最多 2 個且不得有傍晚。
+ * 全部被過濾時保留第一個並改標為「上午」，確保最後一天至少有 1 個行程（前往機場 / 車站）。
+ */
+export function applyDepartureCutoff(trip: TripPlan): TripPlan {
+  const bucket = departureBucket(trip.trip_summary.departure_time);
+  const after = bucket ? SLOT_AFTER[bucket] : null;
+  const days = trip.daily_itinerary;
+  if (!after || !days.length) return trip;
+  const last = days[days.length - 1];
+  let timeline = last.timeline.filter((t) => !after.test(t.time_slot));
+  if (!timeline.length && last.timeline.length) {
+    timeline = [{ ...last.timeline[0], time_slot: bucket === 'morning' ? '上午' : '下午' }];
+  }
+  timeline = timeline.slice(0, 2);
+  if (timeline.length === last.timeline.length) return trip;
+  return { ...trip, daily_itinerary: [...days.slice(0, -1), { ...last, timeline }] };
+}
