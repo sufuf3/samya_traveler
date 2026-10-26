@@ -19,7 +19,9 @@ export const TABLES = {
   DailyUsage: 'DailyUsage',
   UserProfiles: 'UserProfiles',
   RedeemCodes: 'RedeemCodes',
-  EmailOtps: 'EmailOtps'
+  EmailOtps: 'EmailOtps',
+  /** 序號 × 信箱的使用紀錄（PartitionKey = 序號、RowKey = 小寫 email），大型公用碼不受單一欄位 64 KB 限制 */
+  RedeemCodeUsers: 'RedeemCodeUsers'
 } as const;
 export type TableName = (typeof TABLES)[keyof typeof TABLES];
 

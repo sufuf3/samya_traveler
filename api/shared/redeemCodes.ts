@@ -1,6 +1,6 @@
 import { randomInt, randomUUID } from 'node:crypto';
 import { TableClient } from '@azure/data-tables';
-import { CODE_PK, LEGACY_CODE_PK, TABLES, getEntityOrNull, getTable, statusOf } from './storage';
+import { CODE_PK, LEGACY_CODE_PK, TABLES, emailRowKey, getEntityOrNull, getTable, statusOf } from './storage';
 
 /**
  * RedeemCodes：多次數序號（Portaly 贊助方案 / 戰情室批次碼 / 活動公用碼）
@@ -13,7 +13,9 @@ import { CODE_PK, LEGACY_CODE_PK, TABLES, getEntityOrNull, getTable, statusOf } 
  *   RemainingUses   剩餘可用次數
  *   AllowSameEmail  true ：不限信箱，誰都可以用到次數用完（單次碼、聖誕雙人福袋、Reels 抽獎碼…）
  *                   false：買家本人可重複使用全部次數；其他信箱（或沒有 OwnerEmail 的公用碼）每個限用 1 次
- *   UsedByEmails    JSON 字串陣列，用過此序號的「非買家」信箱
+ *   UsedByEmails    JSON 字串陣列，用過此序號的「非買家」信箱（方便在 Portal 直接閱讀；超過約 1,000 筆後不再追加）
+ *                   完整紀錄另存於 RedeemCodeUsers 資料表（PartitionKey = 序號、RowKey = email），
+ *                   因為 Table Storage 單一字串欄位上限 64 KB，max_uses 上千的公用碼會塞不下
  *   CampaignTag     PORTALY_NORMAL / PORTALY_XMAS / REELS_BIRTH / THREADS_EARLY100 / NOV_GIFT…
  *   IsUsed          RemainingUses <= 0 時為 true
  *
@@ -28,7 +30,9 @@ import { CODE_PK, LEGACY_CODE_PK, TABLES, getEntityOrNull, getTable, statusOf } 
 export const CODE_LOCK_MS = 3 * 60 * 1000;
 /** 4~32 字元的英數與連字號（SM5-XXXX-YYYY、NOV-VIP、XMAS-2026…），頭尾不可為連字號 */
 export const CODE_RE = /^[A-Z0-9][A-Z0-9-]{2,30}[A-Z0-9]$/;
-export const MAX_USES_LIMIT = 500;
+export const MAX_USES_LIMIT = 100000;
+/** UsedByEmails 欄位最多保留的字元數（Table Storage 字串上限 32K 字元，保留緩衝） */
+const USED_BY_MAX_CHARS = 30000;
 
 export type CodeStatus = 'unused' | 'processing' | 'exhausted';
 
@@ -162,11 +166,23 @@ function isOwnerOf(v: CodeView, email: string): boolean {
   return !!email && !!v.ownerEmail && email === v.ownerEmail;
 }
 
-/** 呼叫 AI 之前的權限檢查（email 已轉小寫；空字串代表只查剩餘次數） */
-function checkView(v: CodeView, email: string): CodeCheck['status'] {
+/** 是否需要檢查「每個信箱限用 1 次」 */
+function needsEmailCheck(v: CodeView, email: string): boolean {
+  return !!email && !v.allowSameEmail && !isOwnerOf(v, email);
+}
+
+/** 此信箱是否用過此序號：先看 UsedByEmails（含舊資料），再查 RedeemCodeUsers */
+async function hasUsedCode(v: CodeView, email: string): Promise<boolean> {
+  if (v.usedBy.includes(email)) return true;
+  const table = await getTable(TABLES.RedeemCodeUsers);
+  return !!(await getEntityOrNull(table, v.code, emailRowKey(email)));
+}
+
+/** 呼叫 AI 之前的權限檢查（email 已轉小寫；空字串代表只查剩餘次數；usedBefore 由 hasUsedCode 查得） */
+function checkView(v: CodeView, email: string, usedBefore = false): CodeCheck['status'] {
   if (v.remainingUses <= 0) return 'exhausted';
-  if (email && !v.allowSameEmail && !isOwnerOf(v, email)) {
-    if (v.usedBy.includes(email)) return v.ownerEmail ? 'companion_used' : 'email_used';
+  if (needsEmailCheck(v, email)) {
+    if (usedBefore) return v.ownerEmail ? 'companion_used' : 'email_used';
     if (v.pending.some((l) => l.email === email)) return 'processing';
   }
   if (v.remainingUses - v.pending.length <= 0) return 'processing';
@@ -194,7 +210,8 @@ export async function inspectCode(code: string, email = ''): Promise<CodeCheck> 
   if (!e) return { status: 'not_found' };
   const view = viewOf(e);
   const mail = cleanEmail(email);
-  return { status: checkView(view, mail), view, isOwner: isOwnerOf(view, mail) };
+  const usedBefore = needsEmailCheck(view, mail) && (await hasUsedCode(view, mail));
+  return { status: checkView(view, mail, usedBefore), view, isOwner: isOwnerOf(view, mail) };
 }
 
 export type LockResult = { status: 'ok'; lockId: string } | { status: CodeProblem };
@@ -207,7 +224,8 @@ export async function lockCode(code: string, email: string): Promise<LockResult>
     const e = await findEntity(table, code);
     if (!e) return { status: 'not_found' };
     const v = viewOf(e);
-    const state = checkView(v, mail);
+    const usedBefore = needsEmailCheck(v, mail) && (await hasUsedCode(v, mail));
+    const state = checkView(v, mail, usedBefore);
     if (state !== 'ok') return { status: state };
 
     const lockId = randomUUID();
@@ -235,13 +253,21 @@ export async function lockCode(code: string, email: string): Promise<LockResult>
 export async function markCodeUsed(code: string, lockId: string, email: string, destination: string): Promise<number> {
   const table = await getTable(TABLES.RedeemCodes);
   const mail = cleanEmail(email);
+  let recorded = false;
   for (let attempt = 0; attempt < 10; attempt++) {
     const e = await findEntity(table, code);
     if (!e) throw new Error(`RedeemCodes(${code}) 不存在，無法核銷`);
     const v = viewOf(e);
+    // 非買家信箱先寫入 RedeemCodeUsers（完整紀錄），再釋放自己的鎖，避免同一信箱趁空檔重複使用
+    if (!recorded && mail && !isOwnerOf(v, mail)) {
+      const users = await getTable(TABLES.RedeemCodeUsers);
+      await users.upsertEntity({ partitionKey: code, rowKey: emailRowKey(mail), email: mail, usedAt: new Date().toISOString() }, 'Replace');
+      recorded = true;
+    }
     const pending = v.pending.filter((l) => l.id !== lockId);
     const remaining = Math.max(0, v.remainingUses - 1);
-    const usedBy = isOwnerOf(v, mail) || v.usedBy.includes(mail) ? v.usedBy : [...v.usedBy, mail];
+    const appended = isOwnerOf(v, mail) || v.usedBy.includes(mail) ? v.usedBy : [...v.usedBy, mail];
+    const usedBy = JSON.stringify(appended).length <= USED_BY_MAX_CHARS ? appended : v.usedBy;
     try {
       await table.updateEntity(
         {

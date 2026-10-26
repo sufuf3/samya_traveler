@@ -73,6 +73,9 @@ Email 當 RowKey 時只會轉義 Table Storage 不允許的字元（`/ \ # ?`、
 - `false` 且有 `OwnerEmail`（300 / 488 多人方案）：買家本人可重複使用到次數歸零；其他旅伴信箱每個限用 1 次（記在 `UsedByEmails`）。
 - `false` 且 `OwnerEmail = ""`（戰情室公用碼，例如 `NOV-VIP`）：每個信箱限用 1 次。
 
+「每個信箱限用 1 次」以單一序號為單位：同一信箱可以各用 `SURVEY-VIP1`、`SURVEY-VIP2` 一次。完整的使用紀錄存在 `RedeemCodeUsers` 資料表（PartitionKey = 序號、RowKey = 小寫 email）；
+`UsedByEmails` 欄位只保留前約 1,000 筆方便在 Portal 閱讀（Table Storage 單一字串欄位上限 64 KB）。`max_uses` 上限 100,000。
+
 同一組序號可以多人同時使用：每次生成在 `PendingLocks` 各持有一把鎖，`RemainingUses - 進行中的鎖 > 0` 才能再鎖，超過 3 分鐘的鎖自動失效。
 舊資料自動換算：`max_uses / used_count / allow_same_email / used_by_emails / campaign_tag / sponsor_email` 對應到新欄位，最早的一次性序號視為 `RemainingUses = IsUsed ? 0 : 1`；舊序號被使用時會在原本那一列補上新欄位。
 
