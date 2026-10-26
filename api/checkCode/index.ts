@@ -18,7 +18,7 @@ function validMessage(v: CodeView, isOwner: boolean): string {
   if (v.allowSameEmail) return `✅ 序號有效！此序號${left}規劃額度，填好表單即可開始規劃（免收驗證碼）。`;
   if (isOwner) return `✅ 歡迎回來！你是這組序號的買家本人，可重複使用${left}額度。`;
   if (v.ownerEmail) return `✅ 旅伴分享序號有效！你的信箱可免費體驗 1 次（全組${left}）。`;
-  return `✅ 活動 VIP 序號有效！每個信箱限體驗 1 次（全場${left}）。`;
+  return '✅ 活動 VIP 序號有效！每個信箱限體驗 1 次，填好表單即可開始規劃。';
 }
 
 export async function checkCode(request: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
@@ -36,9 +36,10 @@ export async function checkCode(request: HttpRequest, context: InvocationContext
       return json(request, 200, { status: 'not_found', code, message: CODE_MESSAGES.not_found });
     }
     const v = check.view;
+    const isPublic = !v.allowSameEmail && !v.ownerEmail;
     const info = {
-      remaining_uses: v.remainingUses,
-      total_uses: v.totalUses,
+      // 活動公用碼不透露公用池剩餘次數
+      ...(isPublic ? { code_kind: 'public' } : { remaining_uses: v.remainingUses, total_uses: v.totalUses }),
       allow_same_email: v.allowSameEmail,
       is_owner: check.isOwner,
       ...(v.planName ? { plan_name: v.planName } : {})

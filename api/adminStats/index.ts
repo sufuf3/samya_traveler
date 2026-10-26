@@ -24,6 +24,7 @@ import {
  *   { date_key, today: { free_used, free_limit, code_used, vip_limit, vip_whitelist_used, ...剩餘名額 },
  *     trend: 近 7 日 [{ date, free_used, code_used, vip_whitelist_used, total }],
  *     total_users, free_trial_users, emails_sent_today,
+ *     users: 已完成首次免費體驗的使用者 [{ email, used_at, destination? }]（used_at 倒序；destination 為最近一次規劃的目的地）,
  *     total_codes, campaigns: 各 campaign_tag 核銷統計, top_codes: 序號核銷排行榜 }
  *
  * POST /api/dashboard-stats   產生行銷序號（與 POST /api/generateCode 的 mode: batch / custom 相同）
@@ -74,16 +75,22 @@ async function handleGet(request: HttpRequest): Promise<HttpResponseInit> {
 
   const usage = await readPoolUsage(dateKey);
 
-  // 用戶數
+  // 用戶數 + 已完成首次免費體驗的名單（供戰情室匯出 Email 寄發問卷，依體驗時間倒序）
   const profiles = await getTable(TABLES.UserProfiles);
   let totalUsers = 0;
-  let freeTrialUsers = 0;
-  for await (const e of profiles.listEntities<{ free_quota_used?: boolean }>({
-    queryOptions: { filter: odata`PartitionKey eq ${PROFILE_PK}`, select: ['free_quota_used'] }
+  const users: { email: string; used_at: string; destination?: string }[] = [];
+  for await (const e of profiles.listEntities<{ free_quota_used?: boolean; email?: string; used_at?: string; last_destination?: string }>({
+    queryOptions: { filter: odata`PartitionKey eq ${PROFILE_PK}`, select: ['RowKey', 'free_quota_used', 'email', 'used_at', 'last_destination'] }
   })) {
     totalUsers++;
-    if (e.free_quota_used === true) freeTrialUsers++;
+    if (e.free_quota_used !== true) continue;
+    users.push({
+      email: e.email || decodeURIComponent(String(e.rowKey)),
+      used_at: e.used_at || '',
+      ...(e.last_destination ? { destination: e.last_destination } : {})
+    });
   }
+  users.sort((a, b) => b.used_at.localeCompare(a.used_at));
 
   // 序號：各活動核銷統計 + 排行榜（新舊 PartitionKey 都列）
   const campaigns = new Map<string, CampaignStat>();
@@ -116,7 +123,8 @@ async function handleGet(request: HttpRequest): Promise<HttpResponseInit> {
     today: { ...usage, free_limit: free, vip_limit: vip, ...poolRemaining(usage) },
     trend,
     total_users: totalUsers,
-    free_trial_users: freeTrialUsers,
+    free_trial_users: users.length,
+    users,
     emails_sent_today: await readCounter(EMAIL_COUNTER, dateKey),
     email_daily_cap: envInt('EMAIL_DAILY_CAP', 400),
     total_codes: codes.length,

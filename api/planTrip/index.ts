@@ -52,7 +52,8 @@ import {
  *   管理員：不受限，只累計 vip_whitelist_used
  *
  * 回應碼：
- *   200 成功        { data, entitlement, code_preserved, free_quota_preserved, remainingUses?（= code_remaining_uses）, ...雙水池名額 }
+ *   200 成功        { data, entitlement, code_preserved, free_quota_preserved, remainingUses?（= code_remaining_uses）, codeKind?, ...雙水池名額 }
+ *                   活動公用碼（AllowSameEmail = false 且無 OwnerEmail）回傳 codeKind: 'public'，不回傳 remainingUses
  *   401 管理員金鑰錯誤 { error: 'invalid_admin_token' }
  *   400 輸入錯誤    { error: 'invalid_input' | 'invalid_code' | 'invalid_otp' | 'otp_expired' | 'otp_locked' | 'otp_missing', message }
  *   402 需要贊助    { error: 'payment_required', message, portaly_url }
@@ -528,6 +529,7 @@ async function handlePost(request: HttpRequest, context: InvocationContext): Pro
   let entitlement: Entitlement;
   let codePreserved = false;
   let freeQuotaPreserved = false;
+  let publicCode = false;
 
   if (req.otpCode && freeAvailable && (rem.free_remaining > 0 || !req.redeemCode)) {
     if (rem.free_remaining === 0) return poolFullResponse(request, 'free', rem);
@@ -539,6 +541,8 @@ async function handlePost(request: HttpRequest, context: InvocationContext): Pro
     const check = await inspectCode(req.redeemCode, req.email);
     if (check.status !== 'ok') return codeErrorResponse(request, check.status);
     if (rem.code_total_remaining === 0) return poolFullResponse(request, 'code', rem);
+    // 活動公用碼（每信箱限 1 次、沒有買家）：不對外透露公用池剩餘次數
+    publicCode = !check.view.allowSameEmail && !check.view.ownerEmail;
     entitlement = 'redeem_code';
     freeQuotaPreserved = freeAvailable;
   } else if (!freeAvailable) {
@@ -633,7 +637,8 @@ async function handlePost(request: HttpRequest, context: InvocationContext): Pro
     entitlement,
     code_preserved: codePreserved,
     free_quota_preserved: freeQuotaPreserved,
-    ...(codeRemainingUses !== undefined ? { remainingUses: codeRemainingUses, code_remaining_uses: codeRemainingUses } : {}),
+    ...(publicCode ? { codeKind: 'public' } : {}),
+    ...(codeRemainingUses !== undefined && !publicCode ? { remainingUses: codeRemainingUses, code_remaining_uses: codeRemainingUses } : {}),
     ...poolFields(poolRemaining(reserved.usage))
   });
 }
