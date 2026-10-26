@@ -6,13 +6,16 @@ import nodemailer, { Transporter } from 'nodemailer';
  * 環境變數：
  *   GMAIL_USER          寄件 Gmail 帳號，預設 littlebear.samya@gmail.com
  *   GMAIL_APP_PASSWORD  Google 帳戶產生的 16 碼「應用程式密碼」（自動去除空白，貼成 "abcd efgh ijkl mnop" 也沒關係）
- *   MAIL_FROM_NAME      寄件人顯示名稱，預設「SlowMate 慢旅伴」
+ *   MAIL_FROM_NAME      寄件人顯示名稱，預設「SlowMate · AI 慢旅行程規劃助手」
  *   MAIL_REPLY_TO       選填，回覆信件的收件地址
  *
  * Gmail 個人帳號每日約可寄 500 封，EMAIL_DAILY_CAP 預設 400 封留緩衝。
  */
 
 const DEFAULT_GMAIL_USER = 'littlebear.samya@gmail.com';
+
+/** 品牌名稱：寄件人、信件主旨、Header 與 Footer 一律使用 */
+export const BRAND_NAME = 'SlowMate · AI 慢旅行程規劃助手';
 
 let transporter: Transporter | null = null;
 
@@ -49,7 +52,7 @@ function getTransporter(): Transporter {
 }
 
 export function mailFrom(): string {
-  const name = (process.env.MAIL_FROM_NAME || 'SlowMate 慢旅伴').replace(/["<>]/g, '');
+  const name = (process.env.MAIL_FROM_NAME || BRAND_NAME).replace(/["<>]/g, '');
   return `"${name}" <${gmailUser()}>`;
 }
 
@@ -92,40 +95,47 @@ export function escapeHtml(value: unknown): string {
 }
 
 /** 行程信 / 純文字行程統一使用的頁尾小叮嚀 */
-export const SLOW_TRAVEL_NOTE_TITLE = '🌿 慢旅伴的小叮嚀：';
+export const SLOW_TRAVEL_NOTE_TITLE = '🌿 SlowMate 的小叮嚀：';
 export const SLOW_TRAVEL_NOTE_BODY =
   '這份提案是為你梳理的旅行靈感。最迷人的風景往往藏在不期而遇的街角——實際出發時，請隨當天的天氣、體力與心情自由增減步調；造訪獨立小店或寺院前，也別忘了點擊「📍 導航」再次確認當日的營業時間與最新預約資訊喔！';
 
 /* ------------------------------------------------------------------ */
-/* 序號信（Portaly 贊助自動寄送；支援多次數 max_uses）                      */
+/* 序號信（Portaly 贊助自動寄送：方案名稱、總次數、共享規則）                */
 /* ------------------------------------------------------------------ */
 
 export interface CodeEmailInput {
   code: string;
   magicLink: string;
   sponsorName?: string;
-  maxUses?: number;
-  allowSameEmail?: boolean;
+  planName: string;
+  totalUses: number;
+  allowSameEmail: boolean;
+  /** 聖誕囤票祭：信件底部加上「曬行程抽年票」活動提示 */
+  xmas?: boolean;
 }
 
-/** 序號用途說明（信件 HTML 與純文字共用） */
-function codeUsageLines(maxUses: number, allowSameEmail: boolean): string[] {
+/** 共享規則說明（HTML 與純文字共用；<strong> 在純文字中會被移除） */
+function codeUsageLines(totalUses: number, allowSameEmail: boolean): string[] {
   const lines =
-    maxUses > 1
-      ? [
-          `這組序號共可生成 <strong>${maxUses} 次</strong>慢旅行程，${allowSameEmail ? '同一個信箱可以重複使用，也可以分享給旅伴' : '每個信箱限用 1 次，歡迎分享給 ' + (maxUses - 1) + ' 位旅伴'}。`
-        ]
-      : ['一組序號可完整生成 1 次慢旅行程，<strong>不限信箱</strong>，也可以轉贈給旅伴使用。'];
-  lines.push('只有在行程「成功生成」後才會扣次數；若遇到當日名額已滿或生成失敗，序號會完整保留。');
+    totalUses <= 1
+      ? ['這組序號可完整生成 <strong>1 次</strong>慢旅行程，不限信箱，也可以轉贈給旅伴使用。']
+      : allowSameEmail
+        ? [`共 <strong>${totalUses} 次</strong>額度，<strong>不限本人或旅伴信箱</strong>，大家都可以自由使用，直到 ${totalUses} 次用完。`]
+        : [
+            `<strong>你本人的信箱</strong>可以重複使用全部 <strong>${totalUses} 次</strong>（例如試排不同路線版本）。`,
+            '也可以把序號丟進 LINE 群組分給旅伴：<strong>每位旅伴的信箱限免費體驗 1 次</strong>（同樣從總次數中扣除）。'
+          ];
+  lines.push('只有在行程「成功生成」後才會扣次數；若遇到當日名額已滿或生成失敗，額度會完整保留，序號也沒有使用期限。');
   return lines;
 }
 
+const XMAS_GIVEAWAY_HTML =
+  '🎄 <strong>曬出你的理想行程抽年票</strong>：將排好的行程截圖分享至 IG 限動或 Threads 並標記 @samya_traveler，就有機會抽中免費【10 次額度慢旅年票】！';
+
 export function renderCodeEmail(input: CodeEmailInput): { subject: string; html: string; text: string } {
-  const maxUses = Math.max(1, input.maxUses || 1);
-  const allowSameEmail = input.allowSameEmail !== false;
+  const total = Math.max(1, input.totalUses || 1);
   const name = input.sponsorName ? `${input.sponsorName}，` : '';
-  const usage = codeUsageLines(maxUses, allowSameEmail);
-  const codeLabel = maxUses > 1 ? `可使用 ${maxUses} 次的解鎖序號` : '一次性解鎖序號';
+  const usage = codeUsageLines(total, input.allowSameEmail);
   const html = `<!DOCTYPE html>
 <html lang="zh-TW"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
 <body style="margin:0;padding:0;background:#FBF9F5;font-family:'Noto Sans TC',-apple-system,BlinkMacSystemFont,'PingFang TC','Microsoft JhengHei',sans-serif;">
@@ -133,35 +143,41 @@ export function renderCodeEmail(input: CodeEmailInput): { subject: string; html:
     <tr><td align="center" style="padding:28px 16px;">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#FFFFFF;border:1px solid #E6E1D6;border-radius:20px;">
         <tr><td style="padding:28px 24px;color:#2C3531;">
-          <div style="font-family:'Noto Serif TC',Georgia,serif;font-size:14px;letter-spacing:2px;color:#435E4F;font-weight:700;">SlowMate 慢旅伴 · AI 慢旅行程規劃師</div>
+          <div style="font-family:'Noto Serif TC',Georgia,serif;font-size:14px;letter-spacing:2px;color:#435E4F;font-weight:700;">${escapeHtml(BRAND_NAME)}</div>
           <h1 style="font-family:'Noto Serif TC',Georgia,serif;font-size:21px;margin:12px 0;">☕ ${escapeHtml(name)}謝謝你的隨喜贊助！</h1>
-          <p style="font-size:14px;line-height:1.8;color:#6E7873;margin:0 0 18px;">你的支持讓 SlowMate 慢旅伴能繼續陪伴更多旅人慢慢走。以下是你的專屬<strong>${codeLabel}</strong>：</p>
+          <p style="font-size:14px;line-height:1.8;color:#6E7873;margin:0 0 16px;">你的支持讓 SlowMate 能繼續陪伴更多旅人慢慢走。以下是你的專屬解鎖序號：</p>
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#FFF6E9;border:1px solid #F2D7A9;border-radius:14px;margin-bottom:12px;">
+            <tr><td style="padding:12px 16px;font-size:14px;line-height:1.8;color:#2C3531;">
+              <div>購買方案：<strong>【${escapeHtml(input.planName)}】</strong></div>
+              <div>總可用次數：<strong>${total} 次</strong></div>
+            </td></tr>
+          </table>
           <div style="text-align:center;background:#E6EFEA;border:1px dashed #5B7B6A;border-radius:14px;padding:18px 10px;font-family:'SFMono-Regular',Consolas,monospace;font-size:24px;font-weight:700;letter-spacing:3px;color:#435E4F;">${escapeHtml(input.code)}</div>
-          ${maxUses > 1 ? `<p style="text-align:center;font-size:13px;color:#435E4F;font-weight:700;margin:10px 0 0;">🎟️ 可用次數：${maxUses} 次</p>` : ''}
           <div style="text-align:center;margin:22px 0 6px;">
             <a href="${escapeHtml(input.magicLink)}" style="display:inline-block;background:#5B7B6A;color:#FFFFFF;text-decoration:none;font-weight:700;border-radius:12px;padding:12px 26px;font-size:15px;">✨ 一鍵帶入序號，回到 SlowMate 規劃旅程</a>
           </div>
-          <p style="font-size:12px;line-height:1.7;color:#8A938E;text-align:center;margin:6px 0 18px;">點擊按鈕會自動填入序號，並恢復你贊助前填寫的表單內容。</p>
+          <p style="font-size:12px;line-height:1.7;color:#8A938E;text-align:center;margin:6px 0 18px;">點擊按鈕會自動填入序號與你的 Email，並恢復你贊助前填寫的表單內容。</p>
           <p style="font-size:13px;line-height:1.8;color:#6E7873;margin:0;">${usage.map((l) => `• ${l}`).join('<br>')}</p>
+          ${input.xmas ? `<div style="margin-top:18px;background:#FDECEA;border:1px solid #F3C3B4;border-radius:14px;padding:14px 16px;font-size:13px;line-height:1.8;color:#7A2E22;">${XMAS_GIVEAWAY_HTML}</div>` : ''}
         </td></tr>
       </table>
-      <div style="font-size:12px;color:#6E7873;margin-top:14px;">有任何問題歡迎私訊 IG @samya_traveler · Curated Slow Travel</div>
+      <div style="font-size:12px;color:#6E7873;margin-top:14px;">${escapeHtml(BRAND_NAME)} · 有任何問題歡迎私訊 IG @samya_traveler</div>
     </td></tr>
   </table>
 </body></html>`;
+  const strip = (l: string) => l.replace(/<\/?strong>/g, '');
   const text = `${name}謝謝你的隨喜贊助！
 
-你的 SlowMate 慢旅伴${codeLabel}：${input.code}${maxUses > 1 ? `（可用 ${maxUses} 次）` : ''}
+購買方案：【${input.planName}】
+總可用次數：${total} 次
+你的解鎖序號：${input.code}
 
 一鍵帶入序號：${input.magicLink}
 
-${usage.map((l) => `• ${l.replace(/<\/?strong>/g, '')}`).join('\n')}
-
+${usage.map((l) => `• ${strip(l)}`).join('\n')}
+${input.xmas ? `\n${strip(XMAS_GIVEAWAY_HTML)}\n` : ''}
 有任何問題歡迎私訊 IG @samya_traveler
-— Curated Slow Travel by @samya_traveler`;
-  const subject =
-    maxUses > 1
-      ? `☕ 謝謝你的贊助！這是你的 SlowMate 慢旅伴解鎖序號（可用 ${maxUses} 次）`
-      : '☕ 謝謝你的贊助！這是你的 SlowMate 慢旅伴一次性解鎖序號';
+— ${BRAND_NAME} · https://samya-traveler.github.io/slowmate/`;
+  const subject = `☕ 你的【${input.planName}】解鎖序號（${total} 次額度）｜${BRAND_NAME}`;
   return { subject, html, text };
 }

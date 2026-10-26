@@ -42,11 +42,13 @@ import { MAX_TRIP_DAYS, TRAVEL_TIME_MAX, TripPlan, TripValidationError, listTrip
  *   管理員：不受限，只累計 vip_whitelist_used
  *
  * 回應碼：
- *   200 成功        { data, entitlement, code_preserved, free_quota_preserved, code_remaining_uses?, ...雙水池名額 }
+ *   200 成功        { data, entitlement, code_preserved, free_quota_preserved, remainingUses?（= code_remaining_uses）, ...雙水池名額 }
  *   401 管理員金鑰錯誤 { error: 'invalid_admin_token' }
  *   400 輸入錯誤    { error: 'invalid_input' | 'invalid_code' | 'invalid_otp' | 'otp_expired' | 'otp_locked' | 'otp_missing', message }
  *   402 需要贊助    { error: 'payment_required', message, portaly_url }
- *   403 需驗證信箱  { status: 'otp_required', error: 'otp_required', reason?: 'free_first', message }
+ *   402 序號不可用  { error: 'code_unavailable', reason: 'not_found' | 'exhausted', message }
+ *   403 需驗證信箱  { status: 'otp_required', error: 'otp_required', message }
+ *   403 信箱已用過  { error: 'code_email_used', reason: 'companion_used' | 'email_used', message }   旅伴 / 活動公用碼每個信箱限 1 次（未扣額度）
  *   409 處理中      { error: 'code_processing' | 'entitlement_busy', message }
  *   429 今日額滿    { error: 'free_pool_full' | 'token_limit_reached', message }
  *   502/504 AI 失敗 { error: 'generation_failed' | 'generation_timeout', message }
@@ -59,6 +61,8 @@ function portalyUrl(): string {
 interface PlanRequestBody {
   email?: unknown;
   redeem_code?: unknown;
+  /** 新版前端欄位名稱（與 redeem_code 擇一） */
+  redeemCode?: unknown;
   destination?: unknown;
   start_date?: unknown;
   end_date?: unknown;
@@ -101,7 +105,7 @@ function validate(body: PlanRequestBody): ValidatedRequest {
   if (dates.length < 1) throw new BadRequestError('結束日期不能早於開始日期。');
   if (dates.length > MAX_TRIP_DAYS) throw new BadRequestError(`慢旅助手目前最多支援 ${MAX_TRIP_DAYS} 天深度規劃，請調整日期區間。`);
 
-  const redeemCode = cleanCode(body.redeem_code);
+  const redeemCode = cleanCode(body.redeem_code ?? body.redeemCode);
   if (redeemCode && !CODE_RE.test(redeemCode)) {
     throw new BadRequestError('序號格式不正確，請確認信件或活動貼文中的序號。', 'invalid_code');
   }
@@ -177,7 +181,7 @@ function buildSystemPrompt(dayCount: number, season: SeasonHint): string {
       ? `【行程密度：1~5 天，精緻節奏】每天的 timeline 必須「剛好 3 個」時段，time_slot 依序為「上午」、「下午」、「傍晚」。每個 description 約 50~90 字，寫出光線、氣味與街角的氛圍，並在句尾以括號註明建議停留時間，例如（建議停留 2 小時）。`
       : `【行程密度：6~14 天，定點慢活節奏】每天的 timeline 必須「剛好 2 個」時段，time_slot 依序為「上午」、「下午」，不要安排傍晚。文字務必精簡：day_title 15 字內、title 20 字內、description 45 字內並以括號註明建議停留時間。pre_trip_prep 各清單最多 4 項。這是為了確保整份 JSON 完整輸出不被截斷。`;
 
-  return `你是「SlowMate 慢旅伴」的 AI 慢旅行程規劃師，熟悉在地交通與生活感，服務對象是來自台灣、喜歡留白與散步的旅人。
+  return `你是「SlowMate · AI 慢旅行程規劃助手」，熟悉在地交通與生活感，服務對象是來自台灣、喜歡留白與散步的旅人。
 
 【筆觸】
 請以日系慢活生活雜誌（如《Brutus》、《&Premium》）的溫潤散文筆觸書寫：重視光影、氣味、聲音與留白，描寫街角散策、喫茶店的午後、器皿與書店的靜謐時光。語氣溫柔有文青感，但交通、預約、時間等資訊必須明確實用。全部文字使用台灣慣用的繁體中文。
@@ -410,7 +414,10 @@ function codeErrorResponse(request: HttpRequest, problem: CodeProblem): HttpResp
   if (problem === 'processing') {
     return json(request, 409, { error: 'code_processing', message: CODE_MESSAGES.processing });
   }
-  return json(request, 400, { error: 'invalid_code', reason: problem, message: CODE_MESSAGES[problem] });
+  if (problem === 'companion_used' || problem === 'email_used') {
+    return json(request, 403, { error: 'code_email_used', reason: problem, message: CODE_MESSAGES[problem] });
+  }
+  return json(request, 402, { error: 'code_unavailable', reason: problem, message: CODE_MESSAGES[problem] });
 }
 
 function paymentRequired(request: HttpRequest): HttpResponseInit {
@@ -483,8 +490,8 @@ async function handlePost(request: HttpRequest, context: InvocationContext): Pro
 
   /* 2. 資格判定（唯讀）
    *   - 帶 otp_code 且仍有免費資格：驗 OTP → 用免費席；若同時填了有效序號則保留不核銷（code_preserved）。
-   *   - 只帶序號：仍有免費資格且今日免費席未滿 → 403 reason=free_first，先驗 Email 用免費額度、序號保留；
-   *               否則直接核銷序號（免 OTP），免費席滿了就動用序號保留席。
+   *   - 只帶序號：免 OTP，在呼叫 AI 前檢查剩餘次數與信箱權限（買家本人 / 旅伴 / 活動公用碼），
+   *               成功生成才扣次數；免費席滿了就動用序號保留席，首次免費額度保留（free_quota_preserved）。
    *   - 兩者皆無：免費資格已用過 → 402；今日免費席已滿 → 429；否則 403 otp_required。
    */
   const profilesTable = await getTable(TABLES.UserProfiles);
@@ -506,15 +513,6 @@ async function handlePost(request: HttpRequest, context: InvocationContext): Pro
   } else if (req.redeemCode) {
     const check = await inspectCode(req.redeemCode, req.email);
     if (check.status !== 'ok') return codeErrorResponse(request, check.status);
-    if (freeAvailable && rem.free_remaining > 0) {
-      // 免費額度優先保護：先用免費名額，序號一次都不扣
-      return json(request, 403, {
-        status: 'otp_required',
-        error: 'otp_required',
-        reason: 'free_first',
-        message: '你還有首次免費額度！驗證 Email 後會優先使用免費名額，序號完整保留給下次使用 🎁'
-      });
-    }
     if (rem.code_total_remaining === 0) return poolFullResponse(request, 'code', rem);
     entitlement = 'redeem_code';
     freeQuotaPreserved = freeAvailable;
@@ -597,9 +595,7 @@ async function handlePost(request: HttpRequest, context: InvocationContext): Pro
       }));
       await consumeOtp(req.email).catch((err) => context.warn('[planTrip] OTP 作廢失敗（不影響結果）', err));
     } else {
-      codeRemainingUses = await markCodeUsed(req.redeemCode, codeLockId, req.email, {
-        used_for_destination: req.destination
-      });
+      codeRemainingUses = await markCodeUsed(req.redeemCode, codeLockId, req.email, req.destination);
       await recordProfileUsage(req.email, req.destination, nowIso, context);
     }
   } catch (err) {
@@ -612,7 +608,7 @@ async function handlePost(request: HttpRequest, context: InvocationContext): Pro
     entitlement,
     code_preserved: codePreserved,
     free_quota_preserved: freeQuotaPreserved,
-    ...(codeRemainingUses !== undefined ? { code_remaining_uses: codeRemainingUses } : {}),
+    ...(codeRemainingUses !== undefined ? { remainingUses: codeRemainingUses, code_remaining_uses: codeRemainingUses } : {}),
     ...poolFields(poolRemaining(reserved.usage))
   });
 }

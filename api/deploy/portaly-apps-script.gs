@@ -1,5 +1,5 @@
 /**
- * SlowMate 慢旅伴 — Portaly 贊助自動發碼（Google Apps Script）
+ * SlowMate · AI 慢旅行程規劃助手 — Portaly 贊助自動發碼（Google Apps Script）
  *
  * 安裝在收 Portaly 訂單通知的 Gmail（littlebear.samya@gmail.com）：
  *   1. 到 https://script.google.com 以 littlebear.samya@gmail.com 登入 → 新增專案，貼上本檔全部內容。
@@ -112,7 +112,7 @@ function processPortalyOrders_(window, fullScan) {
           // Function 沒寄出序號信（寄信失敗或未設定 Gmail）→ 由本腳本直接以 GmailApp 寄出
           if (!result.idempotent && !result.emailSent && result.code) {
             try {
-              sendCodeEmail_(order.buyerEmail, result.code, result.magicLink);
+              sendCodeEmail_(order.buyerEmail, result);
               delivery = 'apps_script';
             } catch (err) {
               notifyOwner_(message, order, `序號 ${result.code} 已建立，但序號信寄送失敗：${err}\n請手動轉寄 Magic Link：${result.magicLink}`);
@@ -212,6 +212,9 @@ function callGenerateCode_(secret, order) {
         emailSent: data.email_sent === true,
         delivery: data.delivery || '',
         code: data.code || '',
+        planName: data.plan_name || '',
+        totalUses: Number(data.total_uses) || 1,
+        allowSameEmail: data.allow_same_email !== false,
         magicLink: data.magic_link || `${CONFIG.APP_URL}?code=${encodeURIComponent(data.code || '')}`
       };
     }
@@ -225,28 +228,36 @@ function callGenerateCode_(secret, order) {
 /* 備援：由 Apps Script 直接寄出序號信（與 Function 寄出的版型一致）          */
 /* ------------------------------------------------------------------ */
 
-function sendCodeEmail_(to, code, magicLink) {
+function sendCodeEmail_(to, result) {
+  const BRAND = 'SlowMate · AI 慢旅行程規劃助手';
   const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const total = result.totalUses || 1;
+  const plan = result.planName || (total > 1 ? `${total} 次額度方案` : '單次解鎖序號');
+  const rules = total <= 1
+    ? ['這組序號可完整生成 1 次慢旅行程，不限信箱，也可以轉贈給旅伴使用。']
+    : result.allowSameEmail
+      ? [`共 ${total} 次額度，不限本人或旅伴信箱，大家都可以自由使用，直到 ${total} 次用完。`]
+      : [`你本人的信箱可以重複使用全部 ${total} 次。`, '也可以把序號分給旅伴：每位旅伴的信箱限免費體驗 1 次（同樣從總次數中扣除）。'];
+  rules.push('只有在行程成功生成後才會扣次數；若遇到當日名額已滿或生成失敗，額度會完整保留。');
   const html = `<!DOCTYPE html><html lang="zh-TW"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
 <body style="margin:0;padding:0;background:#FBF9F5;font-family:'Noto Sans TC',-apple-system,BlinkMacSystemFont,'PingFang TC','Microsoft JhengHei',sans-serif;">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#FBF9F5;"><tr><td align="center" style="padding:28px 16px;">
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#FFFFFF;border:1px solid #E6E1D6;border-radius:20px;"><tr><td style="padding:28px 24px;color:#2C3531;">
-      <div style="font-family:'Noto Serif TC',Georgia,serif;font-size:14px;letter-spacing:2px;color:#435E4F;font-weight:700;">SlowMate 慢旅伴 · AI 慢旅行程規劃師</div>
+      <div style="font-family:'Noto Serif TC',Georgia,serif;font-size:14px;letter-spacing:2px;color:#435E4F;font-weight:700;">${BRAND}</div>
       <h1 style="font-family:'Noto Serif TC',Georgia,serif;font-size:21px;margin:12px 0;">☕ 謝謝你的隨喜贊助！</h1>
-      <p style="font-size:14px;line-height:1.8;color:#6E7873;margin:0 0 18px;">你的支持讓 SlowMate 慢旅伴能繼續陪伴更多旅人慢慢走。以下是你的專屬<strong>一次性解鎖序號</strong>：</p>
-      <div style="text-align:center;background:#E6EFEA;border:1px dashed #5B7B6A;border-radius:14px;padding:18px 10px;font-family:'SFMono-Regular',Consolas,monospace;font-size:24px;font-weight:700;letter-spacing:3px;color:#435E4F;">${esc(code)}</div>
-      <div style="text-align:center;margin:22px 0 6px;"><a href="${esc(magicLink)}" style="display:inline-block;background:#5B7B6A;color:#FFFFFF;text-decoration:none;font-weight:700;border-radius:12px;padding:12px 26px;font-size:15px;">✨ 一鍵帶入序號，回到 SlowMate 規劃旅程</a></div>
-      <p style="font-size:13px;line-height:1.8;color:#6E7873;margin:18px 0 0;">• 一組序號可完整生成 1 次慢旅行程，<strong>不限信箱</strong>，也可以轉贈給旅伴使用。<br>• 只有在行程「成功生成」後才會核銷；若遇到當日名額已滿或生成失敗，序號會完整保留。</p>
+      <p style="font-size:14px;line-height:1.8;color:#2C3531;margin:0 0 16px;">購買方案：<strong>【${esc(plan)}】</strong><br>總可用次數：<strong>${total} 次</strong></p>
+      <div style="text-align:center;background:#E6EFEA;border:1px dashed #5B7B6A;border-radius:14px;padding:18px 10px;font-family:'SFMono-Regular',Consolas,monospace;font-size:24px;font-weight:700;letter-spacing:3px;color:#435E4F;">${esc(result.code)}</div>
+      <div style="text-align:center;margin:22px 0 6px;"><a href="${esc(result.magicLink)}" style="display:inline-block;background:#5B7B6A;color:#FFFFFF;text-decoration:none;font-weight:700;border-radius:12px;padding:12px 26px;font-size:15px;">✨ 一鍵帶入序號，回到 SlowMate 規劃旅程</a></div>
+      <p style="font-size:13px;line-height:1.8;color:#6E7873;margin:18px 0 0;">${rules.map((l) => '• ' + esc(l)).join('<br>')}</p>
     </td></tr></table>
-    <div style="font-size:12px;color:#6E7873;margin-top:14px;">有任何問題歡迎私訊 IG @samya_traveler · Curated Slow Travel</div>
+    <div style="font-size:12px;color:#6E7873;margin-top:14px;">${BRAND} · 有任何問題歡迎私訊 IG @samya_traveler</div>
   </td></tr></table>
 </body></html>`;
-  const text = `謝謝你的隨喜贊助！\n\n你的 SlowMate 慢旅伴一次性解鎖序號：${code}\n\n一鍵帶入序號：${magicLink}\n\n` +
-    '• 一組序號可完整生成 1 次慢旅行程，不限信箱，也可以轉贈給旅伴使用。\n' +
-    '• 只有在行程成功生成後才會核銷；若遇到當日名額已滿或生成失敗，序號會完整保留。\n\n有任何問題歡迎私訊 IG @samya_traveler';
-  GmailApp.sendEmail(to, '☕ 謝謝你的贊助！這是你的 SlowMate 慢旅伴一次性解鎖序號', text, {
+  const text = `謝謝你的隨喜贊助！\n\n購買方案：【${plan}】\n總可用次數：${total} 次\n你的解鎖序號：${result.code}\n\n一鍵帶入序號：${result.magicLink}\n\n` +
+    rules.map((l) => '• ' + l).join('\n') + `\n\n有任何問題歡迎私訊 IG @samya_traveler\n— ${BRAND}`;
+  GmailApp.sendEmail(to, `☕ 你的【${plan}】解鎖序號（${total} 次額度）｜${BRAND}`, text, {
     htmlBody: html,
-    name: 'SlowMate 慢旅伴'
+    name: BRAND
   });
 }
 

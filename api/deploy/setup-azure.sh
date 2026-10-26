@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================================
-# SlowMate 慢旅伴 — Azure 一鍵建置腳本
+# SlowMate · AI 慢旅行程規劃助手 — Azure 一鍵建置腳本
 #
 # 可在 Azure Cloud Shell (Bash) 或任何已安裝 az、node、npm、zip 的環境執行：
 #   1. git clone https://github.com/sufuf3/samya_traveler.git && cd samya_traveler
@@ -131,7 +131,8 @@ SETTINGS=(
   "AZURE_OPENAI_API_VERSION=2025-01-01-preview"
   "AI_TIMEOUT_MS=120000"
   "GMAIL_USER=$GMAIL_USER"
-  "MAIL_FROM_NAME=SlowMate 慢旅伴"
+  "MAIL_FROM_NAME=SlowMate · AI 慢旅行程規劃助手"
+  "PROMO_MODE=NORMAL"
   "EMAIL_DAILY_CAP=400"
   "DAILY_GLOBAL_LIMIT=50"
   "VIP_POOL_LIMIT=30"
@@ -148,7 +149,7 @@ if ! has_setting GENERATE_CODE_SECRET; then
   SETTINGS+=("GENERATE_CODE_SECRET=$GENERATE_CODE_SECRET_NEW")
 fi
 has_setting OTP_SECRET || SETTINGS+=("OTP_SECRET=$(openssl rand -hex 32)")
-# 管理員金鑰（取代舊的 Email 白名單）：前端 ?admin=1 →「🔐 慢旅伴戰情室」輸入一次；舊名 ADMIN_TOKEN 仍可使用
+# 管理員金鑰（取代舊的 Email 白名單）：前端 ?admin=1 →「🔐 戰情室」輸入一次；舊名 ADMIN_TOKEN 仍可使用
 has_setting ADMIN_SECRET || has_setting ADMIN_TOKEN || SETTINGS+=("ADMIN_SECRET=$(openssl rand -hex 32)")
 
 az functionapp config appsettings set -n "$APP_NAME" -g "$RESOURCE_GROUP" -o none --settings "${SETTINGS[@]}"

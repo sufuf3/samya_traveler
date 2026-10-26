@@ -10,7 +10,7 @@ import { envInt } from './http';
  *                                 vip_whitelist_used（管理員，只統計不設限）；usedCount = free_used + code_used（舊欄位相容）
  *     PartitionKey 'EmailDaily' ：每日寄信封數 usedCount
  * - UserProfiles : PartitionKey = 'User'，RowKey = email（小寫），記錄 free_quota_used、used_at、total_trips
- * - RedeemCodes  : PartitionKey = 'Code'，RowKey = 序號，欄位 max_uses / used_count / status 等（見 redeemCodes.ts）
+ * - RedeemCodes  : PartitionKey = 'RedeemCode'（舊資料 'Code'），RowKey = 序號，欄位 TotalUses / RemainingUses / OwnerEmail 等（見 redeemCodes.ts）
  * - EmailOtps    : PartitionKey = 'OTP'，RowKey = email（小寫），首次免費額度的 Email 驗證碼
  *
  * 所有「讀 → 判斷 → 寫」都使用 ETag 樂觀鎖，避免高併發時超賣名額或重複核銷序號。
@@ -24,7 +24,9 @@ export const TABLES = {
 export type TableName = (typeof TABLES)[keyof typeof TABLES];
 
 export const PROFILE_PK = 'User';
-export const CODE_PK = 'Code';
+/** RedeemCodes：新序號寫在 'RedeemCode'；2026/10 以前的序號留在舊的 'Code'，讀取時兩者都會查 */
+export const CODE_PK = 'RedeemCode';
+export const LEGACY_CODE_PK = 'Code';
 export const OTP_PK = 'OTP';
 
 /** DailyUsage 的 PartitionKey */

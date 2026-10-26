@@ -13,13 +13,13 @@
 
     "GMAIL_USER": "littlebear.samya@gmail.com",
     "GMAIL_APP_PASSWORD": "<16-char-google-app-password>",
-    "MAIL_FROM_NAME": "SlowMate 慢旅伴",
+    "MAIL_FROM_NAME": "SlowMate · AI 慢旅行程規劃助手",
+    "PROMO_MODE": "NORMAL",
     "MAIL_REPLY_TO": "",
     "EMAIL_DAILY_CAP": "400",
 
     "DAILY_GLOBAL_LIMIT": "50",
     "VIP_POOL_LIMIT": "30",
-    "SPONSOR_MAX_USES": "88:1,150:1,300:1",
     "ADMIN_SECRET": "<64-char-random-hex; openssl rand -hex 32>",
     "PORTALY_URL": "https://portaly.cc/samya_traveler",
     "ALLOWED_ORIGINS": "https://samya-traveler.github.io,http://localhost:1313,http://localhost:8080,http://127.0.0.1:8080",

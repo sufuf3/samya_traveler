@@ -1,73 +1,49 @@
 import { timingSafeEqual } from 'node:crypto';
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions';
-import { odata } from '@azure/data-tables';
-import { BadRequestError, adminSecret, json, normalizeEmail, readJsonBody } from '../shared/http';
+import { BadRequestError, adminSecret, adminStatus, json, normalizeEmail, readJsonBody } from '../shared/http';
 import { isMailerConfigured, renderCodeEmail, sendMail } from '../shared/mailer';
-import { MAX_USES_LIMIT, RedeemCodeEntity, cleanCampaignTag, createRandomCode, magicLink } from '../shared/redeemCodes';
+import { planForAmount, promoMode } from '../shared/plans';
+import {
+  AdminCodeInputError,
+  AdminGenerateInput,
+  adminGenerateCodes,
+  createRandomCode,
+  findCodeByOrderId,
+  magicLink,
+  viewOf
+} from '../shared/redeemCodes';
 import { CODE_PK, TABLES, getTable } from '../shared/storage';
 
 /**
  * POST /api/generateCode（舊路徑 /api/generate-code 仍可使用）
  *
- * 給 Portaly 自動發碼（Google Apps Script / Azure Logic App）使用：收到 Portaly 訂單通知後呼叫，
- * 產生一組 SLOW-XXXX-YYYY 序號寫入 RedeemCodes（campaign_tag = "PORTALY"、status = "unused"）。
+ * ── 模式 A：Portaly 贊助自動發碼（Google Apps Script / Logic App 呼叫）───────────────
+ *   Body：{ email（或 sponsor_email）, amount, order_id?, sponsor_name?, notify? }
+ *   依金額與 App Setting PROMO_MODE（NORMAL / XMAS）決定方案（見 shared/plans.ts）：
+ *     NORMAL：>= 488 SM10-（10 次）、>= 300 SM5-（5 次）、其他 SM1-（1 次）
+ *     XMAS  ：>= 488 XMAS14-（14 次）、>= 300 XMAS7-（7 次）、>= 199 XMAS3-（3 次）、其他 SM1-（1 次）
+ *   寫入 RedeemCodes 後以 Gmail 寄出序號信（方案名稱、總次數、共享規則、一鍵帶入連結 ?code=…&email=…）。
+ *   認證（擇一）：?code= / x-functions-key / x-slowmate-secret 等於 GENERATE_CODE_SECRET、GENERATE_CODE_FUNCTION_KEY 或 ADMIN_SECRET。
+ *   冪等：相同且非空的 order_id 只會發一組序號。
  *
- * 可用次數 max_uses 依贊助金額自動設定：App Setting SPONSOR_MAX_USES（例如 "88:1,150:1,300:1"），
- * 未列出的金額為 1 次；Body 帶 max_uses 時以 Body 為準（例如活動多組福袋）。
- * 贊助序號 allow_same_email = true：同一信箱可重複使用，也可轉贈旅伴（認碼不認信箱）。
- * 非三階金額（例如 Portaly 調價）仍照常發碼，僅記錄警告。
- *
- * 認證（擇一符合即放行）：
- *   - Query ?code=<金鑰> 或 Header x-functions-key: <金鑰>（Azure Function Key 慣用寫法）
- *   - Header x-slowmate-secret: <金鑰>
- *   金鑰需等於 App Setting 的 GENERATE_CODE_SECRET、GENERATE_CODE_FUNCTION_KEY 或 ADMIN_SECRET；都沒設定時一律拒絕。
- *   程式讀不到 Azure 平台自動產生的 Function Key，要沿用它請把值複製到 GENERATE_CODE_FUNCTION_KEY。
- *
- * Request Body（皆為選填）：
- * {
- *   "sponsor_email": "user@example.com",
- *   "sponsor_name": "小明",
- *   "amount": 150,                          // 也接受 "150"、"NT$ 150"
- *   "order_id": "PORTALY-20261024-XXXX",    // 也接受 portaly_order_id
- *   "max_uses": 3,                          // 選填，覆寫依金額決定的次數
- *   "campaign_tag": "PORTALY",              // 選填
- *   "notify": true
- * }
- *
- * 冪等：只有傳入相同且非空的 order_id 才回傳同一組序號；否則每次呼叫都產生全新序號（支援同一信箱多次贊助）。
- *
- * 發信權責：
- *   - 已設定 GMAIL_APP_PASSWORD、有 sponsor_email、且 notify !== false → 由本 Function 以 Gmail 寄出序號信（delivery: 'function'），
- *     信中附一鍵帶入連結 https://samya-traveler.github.io/slowmate/?code=SLOW-XXXX-YYYY
- *   - 否則只回傳序號與 magic_link，由 Logic App 自行寄出（delivery: 'logic_app'）
+ * ── 模式 B：戰情室產碼（Header x-admin-secret = ADMIN_SECRET，且 mode 為 "batch" / "custom"）──
+ *   不寄信、OwnerEmail 為空，回傳序號清單與 Magic Link（?code=…）：
+ *     batch ：{ mode, prefix: "GIFT10-", count: 20, max_uses: 10, allow_same_email: true, campaign_tag: "REELS_BIRTH" }
+ *     custom：{ mode, custom_code: "NOV-VIP", max_uses: 50, allow_same_email: false, campaign_tag: "NOV_GIFT" }（已存在則更新）
  *
  * 回應：
- *   201 { code, magic_link, created_at, amount, max_uses, tier?, email_sent, delivery, order_id? }
- *   200 { code, magic_link, idempotent: true, status, ... }   相同 order_id 重送
- *   401 未通過認證
+ *   201 模式 A { code, magic_link, plan_name, total_uses, allow_same_email, campaign_tag, amount, email_sent, delivery, order_id? }
+ *   200 模式 A 相同 order_id 重送 { code, magic_link, idempotent: true, ... }
+ *   201 模式 B { mode, codes: [{ code, magic_link, max_uses, remaining_uses, allow_same_email, campaign_tag, updated? }] }
+ *   400 參數錯誤 / 401 未通過認證
  */
 
-const SPONSOR_TIERS: Record<number, string> = {
-  88: '輕量解鎖',
-  150: '標準支持',
-  300: '深度熱情'
-};
-
-/** 接受 150、"150"、"NT$ 150"、"NT$1,500" 等格式，無法解析時回傳 0。 */
+/** 接受 300、"300"、"NT$ 300"、"NT$1,500" 等格式，無法解析時回傳 0。 */
 function parseAmount(value: unknown): number {
   if (typeof value === 'number') return Number.isFinite(value) && value > 0 ? value : 0;
   const digits = String(value ?? '').replace(/[^\d.]/g, '');
   const n = Number.parseFloat(digits);
   return Number.isFinite(n) && n > 0 ? n : 0;
-}
-
-/** SPONSOR_MAX_USES="88:1,150:1,300:1" → 金額對應的可用次數，未列出的金額為 1 次 */
-function maxUsesForAmount(amount: number): number {
-  for (const pair of (process.env.SPONSOR_MAX_USES || '').split(',')) {
-    const [a, n] = pair.split(':').map((v) => Number.parseInt(v, 10));
-    if (a === amount && n > 0) return Math.min(MAX_USES_LIMIT, n);
-  }
-  return 1;
 }
 
 function safeEqual(a: string, b: string): boolean {
@@ -94,7 +70,8 @@ function isAuthorized(request: HttpRequest): boolean {
   return provided.some((p) => accepted.some((a) => safeEqual(p, a)));
 }
 
-interface GenerateCodeBody {
+interface GenerateCodeBody extends AdminGenerateInput {
+  email?: unknown;
   sponsor_email?: unknown;
   sponsor_name?: unknown;
   amount?: unknown;
@@ -102,109 +79,127 @@ interface GenerateCodeBody {
   order_id?: unknown;
   portaly_order_id?: unknown;
   notify?: unknown;
-  max_uses?: unknown;
-  campaign_tag?: unknown;
+}
+
+async function handleAdmin(request: HttpRequest, context: InvocationContext, body: GenerateCodeBody): Promise<HttpResponseInit> {
+  if (adminStatus(request) !== 'valid') {
+    return json(request, 401, { error: 'unauthorized', message: '戰情室產碼需要管理員金鑰（x-admin-secret）。' });
+  }
+  const result = await adminGenerateCodes(body);
+  context.log(`[generateCode] admin ${result.mode}: ${result.codes.length} code(s) campaign=${result.codes[0]?.campaign_tag}`);
+  return json(request, 201, result);
+}
+
+async function handlePortaly(request: HttpRequest, context: InvocationContext, body: GenerateCodeBody): Promise<HttpResponseInit> {
+  if (!isAuthorized(request)) {
+    return json(request, 401, { error: 'unauthorized', message: 'Invalid secret.' });
+  }
+
+  const rawEmail = body.email ?? body.sponsor_email;
+  const ownerEmail = rawEmail ? normalizeEmail(rawEmail) : '';
+  const sponsorName = String(body.sponsor_name ?? '').trim().slice(0, 60);
+  const amount = parseAmount(body.amount);
+  const currency = String(body.currency ?? 'TWD').trim().toUpperCase().slice(0, 8) || 'TWD';
+  const orderId = String(body.order_id ?? body.portaly_order_id ?? '').trim().slice(0, 120);
+  const notify = body.notify !== false && body.notify !== 'false';
+  const mode = promoMode();
+  const plan = planForAmount(amount, mode);
+  if (amount < 88) context.warn(`[generateCode] 贊助金額無法解析或低於 88：${amount}（仍照常發 1 次碼）`);
+
+  // 冪等：只有「相同且非空的 order_id」才回傳同一組序號
+  if (orderId) {
+    const existing = await findCodeByOrderId(orderId);
+    if (existing) {
+      const v = viewOf(existing);
+      return json(request, 200, {
+        code: v.code,
+        magic_link: magicLink(v.code, v.ownerEmail),
+        plan_name: v.planName,
+        total_uses: v.totalUses,
+        remaining_uses: v.remainingUses,
+        allow_same_email: v.allowSameEmail,
+        campaign_tag: v.campaignTag,
+        amount: v.amount,
+        email_sent: (existing.EmailSent ?? (existing as { email_sent?: boolean }).email_sent) === true,
+        order_id: orderId,
+        idempotent: true
+      });
+    }
+  }
+
+  const code = await createRandomCode(plan.prefix, {
+    totalUses: plan.totalUses,
+    allowSameEmail: plan.allowSameEmail,
+    campaignTag: plan.campaignTag,
+    source: 'portaly',
+    ownerEmail,
+    amount,
+    planName: plan.name,
+    extra: { SponsorName: sponsorName, Currency: currency, OrderId: orderId, EmailSent: false }
+  });
+  const link = magicLink(code, ownerEmail);
+
+  // 已設定 Gmail 應用程式密碼、有收件人且未指定 notify:false → Function 寄；否則交給 Apps Script / Logic App
+  let emailSent = false;
+  let emailError: string | undefined;
+  if (ownerEmail && notify && isMailerConfigured()) {
+    try {
+      const mail = renderCodeEmail({
+        code,
+        magicLink: link,
+        sponsorName,
+        planName: plan.name,
+        totalUses: plan.totalUses,
+        allowSameEmail: plan.allowSameEmail,
+        xmas: mode === 'XMAS'
+      });
+      await sendMail({ to: ownerEmail, subject: mail.subject, html: mail.html, text: mail.text });
+      emailSent = true;
+      const table = await getTable(TABLES.RedeemCodes);
+      await table.updateEntity({ partitionKey: CODE_PK, rowKey: code, EmailSent: true }, 'Merge');
+    } catch (err) {
+      emailError = (err as Error)?.message ?? String(err);
+      context.error('[generateCode] 序號信寄送失敗（序號已建立，請由 Apps Script 補寄）', err);
+    }
+  }
+  const delivery = emailSent ? 'function' : 'logic_app';
+
+  context.log(`[generateCode] created code=${code} plan=${plan.prefix} amount=${amount} mode=${mode} order=${orderId || '-'} delivery=${delivery}`);
+  return json(request, 201, {
+    code,
+    magic_link: link,
+    plan_name: plan.name,
+    total_uses: plan.totalUses,
+    allow_same_email: plan.allowSameEmail,
+    campaign_tag: plan.campaignTag,
+    promo_mode: mode,
+    amount,
+    email_sent: emailSent,
+    delivery,
+    ...(orderId ? { order_id: orderId } : {}),
+    ...(emailError ? { email_error: emailError } : {})
+  });
 }
 
 export async function generateCode(request: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
   try {
-    if (!isAuthorized(request)) {
-      return json(request, 401, { error: 'unauthorized', message: 'Invalid secret.' });
-    }
-
     const body = await readJsonBody<GenerateCodeBody>(request, 8 * 1024).catch((err) => {
       // Logic App 可能不帶 body，視為空物件
       if (err instanceof BadRequestError && err.message.includes('不可為空')) return {} as GenerateCodeBody;
       throw err;
     });
-
-    const sponsorEmail = body.sponsor_email ? normalizeEmail(body.sponsor_email) : '';
-    const sponsorName = String(body.sponsor_name ?? '').trim().slice(0, 60);
-    const amount = parseAmount(body.amount);
-    const tier = SPONSOR_TIERS[amount] ?? '';
-    const currency = String(body.currency ?? 'TWD').trim().toUpperCase().slice(0, 8) || 'TWD';
-    const orderId = String(body.order_id ?? body.portaly_order_id ?? '').trim().slice(0, 120);
-    const notify = body.notify !== false && body.notify !== 'false';
-    const requestedUses = Number.parseInt(String(body.max_uses ?? ''), 10);
-    const maxUses = requestedUses > 0 ? Math.min(MAX_USES_LIMIT, requestedUses) : maxUsesForAmount(amount);
-    const campaignTag = cleanCampaignTag(body.campaign_tag, 'PORTALY');
-    if (amount && !tier) {
-      context.warn(`[generateCode] 非 88/150/300 的贊助金額：${amount}（仍照常發碼）`);
-    }
-
-    const table = await getTable(TABLES.RedeemCodes);
-
-    // 冪等：只有「相同且非空的 order_id」才回傳同一組序號；同一信箱的新贊助（不同或沒有 order_id）一律發新序號
-    if (orderId) {
-      const existing = table.listEntities<RedeemCodeEntity>({
-        queryOptions: { filter: odata`PartitionKey eq ${CODE_PK} and order_id eq ${orderId}` }
-      });
-      for await (const e of existing) {
-        return json(request, 200, {
-          code: e.rowKey,
-          magic_link: magicLink(e.rowKey as string),
-          created_at: e.created_at,
-          amount: e.amount,
-          max_uses: Number(e.max_uses) || 1,
-          is_used: e.is_used === true,
-          status: e.status,
-          email_sent: e.email_sent === true,
-          order_id: orderId,
-          idempotent: true
-        });
-      }
-    }
-
-    const code = await createRandomCode('SLOW', {
-      maxUses,
-      allowSameEmail: true,
-      campaignTag,
-      source: 'portaly',
-      extra: { sponsor_email: sponsorEmail, sponsor_name: sponsorName, amount, tier, currency, order_id: orderId, email_sent: false }
-    });
-    const createdAt = new Date().toISOString();
-
-    // 發信權責：已設定 Gmail 應用程式密碼、有收件人且未指定 notify:false → Function 寄；否則交給 Logic App
-    const functionSends = !!sponsorEmail && notify && isMailerConfigured();
-    let emailSent = false;
-    let emailError: string | undefined;
-    if (functionSends) {
-      try {
-        const mail = renderCodeEmail({ code, magicLink: magicLink(code), sponsorName, maxUses, allowSameEmail: true });
-        await sendMail({ to: sponsorEmail, subject: mail.subject, html: mail.html, text: mail.text });
-        emailSent = true;
-        await table.updateEntity({ partitionKey: CODE_PK, rowKey: code, email_sent: true }, 'Merge');
-      } catch (err) {
-        emailError = (err as Error)?.message ?? String(err);
-        context.error('[generateCode] 序號信寄送失敗（序號已建立，請由 Logic App 補寄）', err);
-      }
-    }
-    const delivery = emailSent ? 'function' : 'logic_app';
-
-    context.log(`[generateCode] created code=${code} amount=${amount} max_uses=${maxUses} order=${orderId || '-'} delivery=${delivery}`);
-    return json(request, 201, {
-      code,
-      magic_link: magicLink(code),
-      created_at: createdAt,
-      amount,
-      max_uses: maxUses,
-      campaign_tag: campaignTag,
-      ...(tier ? { tier } : {}),
-      email_sent: emailSent,
-      delivery,
-      ...(orderId ? { order_id: orderId } : {}),
-      ...(emailError ? { email_error: emailError } : {})
-    });
+    if (body.mode === 'batch' || body.mode === 'custom') return await handleAdmin(request, context, body);
+    return await handlePortaly(request, context, body);
   } catch (err) {
-    if (err instanceof BadRequestError) {
-      return json(request, 400, { error: err.code, message: err.message });
+    if (err instanceof BadRequestError || err instanceof AdminCodeInputError) {
+      return json(request, 400, { error: err instanceof BadRequestError ? err.code : 'invalid_input', message: err.message });
     }
     context.error('[generateCode] 未預期錯誤', err);
     return json(request, 500, { error: 'internal_error', message: '序號產生失敗' });
   }
 }
 
-// authLevel 為 anonymous，由 isAuthorized() 在程式內驗證，才能做到「Function Key 或 x-slowmate-secret 擇一」
+// authLevel 為 anonymous，由程式內驗證，才能做到「Function Key / x-slowmate-secret / 管理員金鑰」擇一
 app.http('generateCode', {
   route: 'generateCode',
   methods: ['POST'],
