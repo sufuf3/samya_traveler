@@ -42,6 +42,12 @@ export interface TripPlan {
       outbound_hint: string;
       inbound_hint: string;
     };
+    /** 跨城 / 核心移動動線膠囊，地點與交通段交替，例如 ["關西機場 (KIX)", "🚆 JR HARUKA (75分)", "京都五條"] */
+    route_ribbon?: string[];
+    /** 當地慢旅花費概算（新台幣，不含國際機票與住宿） */
+    budget_estimate?: BudgetEstimate;
+    /** 慢旅減法宣言（一天只保留 2～3 個重點） */
+    retention_stat_note?: string;
     /** 使用者選填的抵達時間（例：14:30、下午）；由後端依請求寫入，不是 AI 產生 */
     arrival_time?: string;
     /** 使用者選填的離境/離開時間（例：18:00、晚上）；由後端依請求寫入 */
@@ -53,6 +59,12 @@ export interface TripPlan {
     todo_checklist: string[];
   };
   daily_itinerary: DayPlan[];
+}
+
+export interface BudgetEstimate {
+  daily_average_twd: string;
+  total_local_twd: string;
+  budget_note: string;
 }
 
 export const MAX_TRIP_DAYS = 14;
@@ -84,6 +96,23 @@ function optionalTimes(summary: Record<string, unknown>): { arrival_time?: strin
   const arrival = str(summary.arrival_time, TRAVEL_TIME_MAX);
   const departure = str(summary.departure_time, TRAVEL_TIME_MAX);
   return { ...(arrival ? { arrival_time: arrival } : {}), ...(departure ? { departure_time: departure } : {}) };
+}
+
+/** 結果頁「🧭 慢旅動線與日均花費速覽」的三個選填欄位 */
+function magazineFields(summary: Record<string, unknown>): Pick<TripPlan['trip_summary'], 'route_ribbon' | 'budget_estimate' | 'retention_stat_note'> {
+  const ribbon = arr(summary.route_ribbon, 12).map((x) => str(x, 30)).filter(Boolean);
+  const b = isObj(summary.budget_estimate) ? summary.budget_estimate : {};
+  const budget = {
+    daily_average_twd: str(b.daily_average_twd, 40),
+    total_local_twd: str(b.total_local_twd, 40),
+    budget_note: str(b.budget_note, 160)
+  };
+  const note = str(summary.retention_stat_note, 120);
+  return {
+    ...(ribbon.length >= 2 ? { route_ribbon: ribbon } : {}),
+    ...(budget.daily_average_twd || budget.total_local_twd ? { budget_estimate: budget } : {}),
+    ...(note ? { retention_stat_note: note } : {})
+  };
 }
 
 export interface SanitizeOptions {
@@ -165,6 +194,8 @@ export function sanitizeTrip(input: unknown, opts: SanitizeOptions = {}): TripPl
         outbound_hint: str(flightIn.outbound_hint, 300),
         inbound_hint: str(flightIn.inbound_hint, 300)
       },
+      // 動線、預算、減法宣言為選填：AI 偶爾漏掉時不讓整份行程失敗，前端會自行補上
+      ...magazineFields(summaryIn),
       // 只有寬鬆模式（寄信時由前端帶回）才保留；AI 輸出一律以後端收到的請求為準
       ...(opts.lenient ? optionalTimes(summaryIn) : {})
     },
