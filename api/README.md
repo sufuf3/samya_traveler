@@ -182,6 +182,7 @@ OTP 只有在行程「成功生成」後才作廢；AI 生成失敗時，10 分�
 |---|---|
 | `FREE_DAILY_LIMIT`（舊名 `DAILY_GLOBAL_LIMIT`） | 50（每日免費席） |
 | `VIP_POOL_LIMIT` | 30（每日序號保留席） |
+| `SURVEY_URL` | `https://forms.gle/WeFcWEu2NrPP8AWy8`（行程信「雙人慢旅共享禮」問卷連結） |
 | `PROMO_MODE` | `NORMAL`（常態 88 / 300 / 488）；`XMAS` 開啟聖誕囤票祭（199 / 300 / 488） |
 | `EMAIL_DAILY_CAP` | 400 |
 | `AI_TIMEOUT_MS` | 120000 |

@@ -48,6 +48,33 @@ const C = {
 
 const PORTALY_URL = () => process.env.PORTALY_URL || 'https://portaly.cc/samya_traveler';
 const APP_URL = () => process.env.SLOWMATE_APP_URL || 'https://samya-traveler.github.io/slowmate/';
+/** 體驗回饋問卷（完成畫面顯示 2 組 VIP 序號）；可用 App Setting SURVEY_URL 更換 */
+const SURVEY_URL = () => process.env.SURVEY_URL || 'https://forms.gle/WeFcWEu2NrPP8AWy8';
+
+/** 🎉 雙人慢旅共享禮：問卷領 2 組 VIP 序號 + 曬圖再領 1 次（放在轉寄 / 贊助區塊上方） */
+function surveyBlock(): string {
+  const link = `<a href="${escapeHtml(SURVEY_URL())}" target="_blank" style="color:${C.coral};font-weight:700;text-decoration:underline;">SlowMate 體驗回饋問卷</a>`;
+  return `
+        <tr><td style="padding:0 16px 16px;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#FFF4D6;border:1px solid #EBCB7E;border-radius:16px;">
+            <tr><td style="padding:18px 18px 8px;font-size:14px;line-height:1.8;color:${C.text};">
+              <p style="margin:0 0 8px;font-weight:700;font-size:15px;">🎉 填寫 1 分鐘問卷，免費領【雙人慢旅共享禮（共 2 組 VIP 序號）】！</p>
+              <p style="margin:0 0 8px;">喜歡這次 AI 為你梳理的慢旅節奏嗎？歡迎點擊填寫 ${link}！問卷送出後的完成畫面將<strong>直接顯示 2 組 VIP 兌換序號</strong> —— 1 組讓你微調自己的行程，另 1 組可以直接貼進 LINE 群組送給旅伴排他的版本喔！</p>
+              <p style="margin:0;font-size:13px;color:${C.muted};font-style:italic;">（💡 小彩蛋：回網站點選「📸 產生慢旅分享圖」發到 IG 限動或 Threads 標註 @samya_traveler 私訊截圖，還能額外再領 1 次免費額度✨）</p>
+            </td></tr>
+            <tr><td align="center" style="padding:6px 14px 18px;">
+              <a href="${escapeHtml(SURVEY_URL())}" target="_blank" style="display:inline-block;padding:10px 18px;border-radius:12px;background:${C.sage};color:#FFFFFF;text-decoration:none;font-weight:700;font-size:14px;">📝 填寫問卷領 2 組 VIP 序號</a>
+            </td></tr>
+          </table>
+        </td></tr>`;
+}
+
+/** 純文字版問卷段落 */
+const surveyLines = () => [
+  '🎉 填寫 1 分鐘問卷，免費領【雙人慢旅共享禮（共 2 組 VIP 序號）】！',
+  `喜歡這次 AI 為你梳理的慢旅節奏嗎？填寫 SlowMate 體驗回饋問卷（${SURVEY_URL()}），送出後的完成畫面將直接顯示 2 組 VIP 兌換序號 —— 1 組微調自己的行程，另 1 組貼進 LINE 群組送給旅伴排他的版本！`,
+  '（💡 小彩蛋：回網站點選「📸 產生慢旅分享圖」發到 IG 限動或 Threads 標註 @samya_traveler 私訊截圖，還能額外再領 1 次免費額度✨）'
+];
 
 /** 方案說明（聖誕囤票祭期間改為 7 次 / 14 次加碼包） */
 const packsText = () => (promoMode() === 'XMAS' ? '或選擇聖誕限時 7 次 / 14 次加碼旅伴包' : '或選擇 5 次 / 10 次旅伴同樂包');
@@ -219,6 +246,7 @@ function renderHtml(trip: TripPlan): string {
             </td></tr>
           </table>
         </td></tr>
+        ${surveyBlock()}
         ${ctaBlock()}
         <tr><td align="center" style="padding:8px 16px 24px;font-size:12px;color:${C.muted};line-height:1.7;">
           Curated Slow Travel by <a href="https://samya-traveler.github.io/" style="color:${C.sageDark};text-decoration:none;font-weight:600;">@samya_traveler</a> ·
@@ -273,6 +301,7 @@ function renderText(trip: TripPlan): string {
     lines.push('');
   }
   lines.push(SLOW_TRAVEL_NOTE_TITLE, SLOW_TRAVEL_NOTE_BODY, '');
+  lines.push(...surveyLines(), '');
   lines.push(...ctaLines().map((l) => l.replace(/\*\*/g, '')), `• 贊助取得新序號：${PORTALY_URL()}`, `• 回到 SlowMate 規劃：${APP_URL()}`, '');
   lines.push(`— ${BRAND_NAME} · https://samya-traveler.github.io/slowmate/`);
   return lines.join('\n');
