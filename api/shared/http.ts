@@ -8,30 +8,42 @@ import { HttpRequest, HttpResponseInit } from '@azure/functions';
  * 此處的 header 是本機 `func start` 或未設定平台 CORS 時的後備方案。
  * 注意：一旦啟用平台層 CORS，Azure 會以平台設定為準並覆寫這裡的 header。
  */
-const DEFAULT_ALLOWED_ORIGINS = ['https://samya-traveler.github.io'];
+const DEFAULT_ALLOWED_ORIGINS = ['https://samya-traveler.github.io', 'http://localhost:1313', 'http://127.0.0.1:5500'];
 
+/** 允許的來源：App Setting ALLOWED_ORIGINS（逗號分隔），未設定時用預設清單；萬用字元 * 一律忽略 */
 function allowedOrigins(): string[] {
   const raw = process.env.ALLOWED_ORIGINS;
   if (!raw) return DEFAULT_ALLOWED_ORIGINS;
   return raw
     .split(',')
     .map((s) => s.trim().replace(/\/+$/, ''))
-    .filter(Boolean);
+    .filter((s) => s && s !== '*');
+}
+
+function requestOrigin(request: HttpRequest): string {
+  return (request.headers.get('origin') || '').replace(/\/+$/, '');
+}
+
+/**
+ * 瀏覽器從不在白名單的網站呼叫時回 403，連處理都不處理（CORS 只會擋「讀取回應」，擋不住寄信等副作用）。
+ * 沒有 Origin header 的請求（curl、Apps Script 等伺服器端呼叫）不受影響，仍由各端點自己的驗證把關。
+ */
+export function forbiddenOrigin(request: HttpRequest): HttpResponseInit | null {
+  const origin = requestOrigin(request);
+  if (!origin || allowedOrigins().includes(origin)) return null;
+  return json(request, 403, { error: 'forbidden_origin', message: 'This origin is not allowed.' });
 }
 
 export function corsHeaders(request: HttpRequest): Record<string, string> {
-  const origin = (request.headers.get('origin') || '').replace(/\/+$/, '');
+  const origin = requestOrigin(request);
   const list = allowedOrigins();
-  const allowAll = list.includes('*');
   const headers: Record<string, string> = {
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type, x-slowmate-secret, x-slowmate-admin, x-admin-secret',
     'Access-Control-Max-Age': '86400',
     Vary: 'Origin'
   };
-  if (allowAll) {
-    headers['Access-Control-Allow-Origin'] = '*';
-  } else if (origin && list.includes(origin)) {
+  if (origin && list.includes(origin)) {
     headers['Access-Control-Allow-Origin'] = origin;
   }
   return headers;

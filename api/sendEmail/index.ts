@@ -1,7 +1,8 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions';
-import { BadRequestError, envInt, json, normalizeEmail, preflight, readJsonBody } from '../shared/http';
+import { BadRequestError, envInt, forbiddenOrigin, json, normalizeEmail, preflight, readJsonBody } from '../shared/http';
 import { BRAND_NAME, SLOW_TRAVEL_NOTE_BODY, SLOW_TRAVEL_NOTE_TITLE, escapeHtml, sendMail } from '../shared/mailer';
 import { promoMode } from '../shared/plans';
+import { checkLimit, rateLimitedResponse, recordHit } from '../shared/rateLimit';
 import { EMAIL_COUNTER, decrementCounter, taipeiDateKey, tryIncrementCounter } from '../shared/storage';
 import { TripPlan, TripValidationError, applyDepartureCutoff, arrivalNote, departureNote, googleMapsUrl, sanitizeTrip } from '../shared/trip';
 
@@ -289,6 +290,8 @@ interface SendEmailBody {
 
 export async function sendEmail(request: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
   if (request.method === 'OPTIONS') return preflight(request);
+  const blocked = forbiddenOrigin(request);
+  if (blocked) return blocked;
 
   try {
     const body = await readJsonBody<SendEmailBody>(request, 256 * 1024);
@@ -308,6 +311,10 @@ export async function sendEmail(request: HttpRequest, context: InvocationContext
       return json(request, 429, { error: 'email_cooldown', message: `剛剛已寄出行程，請 ${wait} 秒後再試。`, retry_after: wait });
     }
 
+    // 同一 IP 10 分鐘內最多寄出 5 封行程信
+    const ipLimit = await checkLimit(request, 'EmailIp');
+    if (ipLimit.limited) return rateLimitedResponse(request, ipLimit.retryAfter, '同一網路在 10 分鐘內寄送行程信');
+
     const dateKey = taipeiDateKey();
     const quota = await tryIncrementCounter(COUNTER_KIND, dateKey, envInt('EMAIL_DAILY_CAP', 400));
     if (!quota.ok) {
@@ -326,6 +333,7 @@ export async function sendEmail(request: HttpRequest, context: InvocationContext
         text: renderText(trip)
       });
       context.log(`[sendEmail] sent id=${id}`);
+      await recordHit(request, 'EmailIp').catch((err) => context.warn('[sendEmail] IP 計數失敗（不影響寄信）', err));
       return json(request, 200, {
         ok: true,
         id,

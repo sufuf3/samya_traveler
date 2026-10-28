@@ -116,6 +116,16 @@ OTP 只有在行程「成功生成」後才作廢；AI 生成失敗時，10 分�
 
 免費額度走相同流程（`UserProfiles` 的租約），失敗時一樣不會被消耗。
 
+## 安全防護
+
+- **CORS 白名單**：`ALLOWED_ORIGINS`（預設 `https://samya-traveler.github.io`、`http://localhost:1313`、`http://127.0.0.1:5500`，不接受 `*`）。Azure 平台層 CORS 也要設定相同清單（`setup-azure.sh` 會處理）。
+  瀏覽器從其他網站呼叫時直接回 403 `forbidden_origin`、不執行任何動作（CORS 只擋讀取回應，擋不住寄信等副作用）；沒有 `Origin` 的伺服器端呼叫（curl、Apps Script）仍由各端點自己的驗證把關。
+- **輸入長度**：`destination` 30 字、`user_wishes` 300 字、`arrival_time` / `departure_time` 20 字（超過的部分截斷；前端 `maxlength` 相同）。
+- **Prompt Injection**：使用者文字一律包在 `<user_input>` 標籤內，`<` `>` 轉成全形避免提早關閉標籤；System Prompt 聲明忽略標籤內任何修改規則、要求非 JSON 或詢問系統提示詞的指令。
+- **管理員金鑰**：以 SHA-256 定長摘要 + `crypto.timingSafeEqual` 比對。同一 IP 15 分鐘內錯誤 5 次 → 429 `admin_locked`，鎖 15 分鐘（含戰情室、`x-admin-secret` 與 `generateCode` 的 secret）；輸入正確時清除計數。
+- **寄信頻率**：`/api/send-otp` 與 `/api/send-email` 各自限制同一 IP 10 分鐘內最多寄出 5 封（429 `ip_rate_limited`），另有既有的單一信箱冷卻與每日寄信總量上限。
+- IP 取 `x-forwarded-for` 的最後一個位址（Azure 前端附加），計數存在 `RateLimits` 資料表（PartitionKey = 用途、RowKey = IP 的 SHA-256），不存 IP 明碼。
+
 ## 回應碼
 
 | 狀態碼 | 意義 |
@@ -123,9 +133,9 @@ OTP 只有在行程「成功生成」後才作廢；AI 生成失敗時，10 分�
 | 200 | 成功 |
 | 400 | `invalid_input`、`invalid_code`、OTP 錯誤、`disposable_email` |
 | 402 | `payment_required`（免費額度已用過）、`code_unavailable`（序號不存在 / 次數用完） |
-| 403 | `otp_required`、`code_email_used`（旅伴 / 公用碼信箱已用過） |
+| 403 | `otp_required`、`code_email_used`（旅伴 / 公用碼信箱已用過）、`forbidden_origin`（非白名單網站） |
 | 409 | 序號或免費額度正在另一個視窗生成中 |
-| 429 | `free_pool_full`、`token_limit_reached`、`otp_cooldown`、`email_daily_cap` |
+| 429 | `free_pool_full`、`token_limit_reached`、`otp_cooldown`、`email_daily_cap`、`ip_rate_limited`、`admin_locked` |
 | 502 / 504 | AI 生成或寄信失敗（已全數回滾） |
 
 ## AI 模型：Azure OpenAI gpt-4.1

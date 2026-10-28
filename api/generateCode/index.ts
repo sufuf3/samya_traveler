@@ -1,6 +1,7 @@
 import { timingSafeEqual } from 'node:crypto';
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions';
-import { BadRequestError, adminSecret, adminStatus, json, normalizeEmail, readJsonBody } from '../shared/http';
+import { BadRequestError, adminSecret, json, normalizeEmail, readJsonBody } from '../shared/http';
+import { adminLockedResponse, checkLimit, recordAdminFailure, verifyAdmin } from '../shared/rateLimit';
 import { isMailerConfigured, renderCodeEmail, sendMail } from '../shared/mailer';
 import { planForAmount, promoMode } from '../shared/plans';
 import {
@@ -82,7 +83,9 @@ interface GenerateCodeBody extends AdminGenerateInput {
 }
 
 async function handleAdmin(request: HttpRequest, context: InvocationContext, body: GenerateCodeBody): Promise<HttpResponseInit> {
-  if (adminStatus(request) !== 'valid') {
+  const { status, retryAfter } = await verifyAdmin(request);
+  if (status === 'locked') return adminLockedResponse(request, retryAfter);
+  if (status !== 'valid') {
     return json(request, 401, { error: 'unauthorized', message: '戰情室產碼需要管理員金鑰（x-admin-secret）。' });
   }
   const result = await adminGenerateCodes(body);
@@ -91,7 +94,12 @@ async function handleAdmin(request: HttpRequest, context: InvocationContext, bod
 }
 
 async function handlePortaly(request: HttpRequest, context: InvocationContext, body: GenerateCodeBody): Promise<HttpResponseInit> {
+  // 這裡也接受 ADMIN_SECRET，所以錯誤的金鑰同樣計入 IP 鎖定，避免繞過戰情室的防暴力破解
+  const lock = await checkLimit(request, 'AdminFail');
+  if (lock.limited) return adminLockedResponse(request, lock.retryAfter);
   if (!isAuthorized(request)) {
+    const fail = await recordAdminFailure(request);
+    if (fail.locked) return adminLockedResponse(request, fail.retryAfter);
     return json(request, 401, { error: 'unauthorized', message: 'Invalid secret.' });
   }
 

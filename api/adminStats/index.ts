@@ -1,6 +1,7 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions';
 import { odata } from '@azure/data-tables';
-import { BadRequestError, adminStatus, envInt, json, preflight, readJsonBody } from '../shared/http';
+import { BadRequestError, envInt, forbiddenOrigin, json, preflight, readJsonBody } from '../shared/http';
+import { adminLockedResponse, verifyAdmin } from '../shared/rateLimit';
 import { AdminCodeInputError, AdminGenerateInput, adminGenerateCodes, listAllCodes } from '../shared/redeemCodes';
 import {
   EMAIL_COUNTER,
@@ -34,6 +35,7 @@ import {
  *   201 { mode, codes: [{ code, magic_link, max_uses, remaining_uses, allow_same_email, campaign_tag, updated? }] }
  *
  *   401 { error: 'unauthorized' }  未帶或帶錯金鑰
+ *   429 { error: 'admin_locked' }  同一 IP 15 分鐘內金鑰錯誤 5 次（鎖 15 分鐘）
  */
 
 const TREND_DAYS = 7;
@@ -143,7 +145,11 @@ async function handlePost(request: HttpRequest, context: InvocationContext): Pro
 
 export async function adminStats(request: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
   if (request.method === 'OPTIONS') return preflight(request);
-  if (adminStatus(request) !== 'valid') {
+  const blocked = forbiddenOrigin(request);
+  if (blocked) return blocked;
+  const { status, retryAfter } = await verifyAdmin(request);
+  if (status === 'locked') return adminLockedResponse(request, retryAfter);
+  if (status !== 'valid') {
     return json(request, 401, { error: 'unauthorized', message: '管理員金鑰無效。' });
   }
   try {

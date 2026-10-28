@@ -1,7 +1,8 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions';
 import { isDisposableEmail } from '../shared/disposable';
-import { BadRequestError, envInt, json, normalizeEmail, preflight, readJsonBody } from '../shared/http';
+import { BadRequestError, envInt, forbiddenOrigin, json, normalizeEmail, preflight, readJsonBody } from '../shared/http';
 import { sendMail } from '../shared/mailer';
+import { checkLimit, rateLimitedResponse, recordHit } from '../shared/rateLimit';
 import { OTP_RESEND_COOLDOWN_MS, OTP_TTL_MS, issueOtp, renderOtpEmail, rollbackIssuedOtp } from '../shared/otp';
 import {
   EMAIL_COUNTER,
@@ -26,6 +27,8 @@ import {
  *   400 { error: 'invalid_input' | 'disposable_email' } 信箱格式錯誤 / 免洗信箱
  *   402 { error: 'payment_required', portaly_url }      此信箱已用過免費額度 → 不寄信
  *   429 { error: 'otp_cooldown', retry_after }          60 秒內已寄過
+ *   429 { error: 'ip_rate_limited', retry_after }       同一 IP 10 分鐘內已寄出 5 封
+ *   403 { error: 'forbidden_origin' }                   非白名單網站的跨域呼叫
  *   429 { error: 'otp_daily_limit' }                    同一信箱今日寄送次數已達上限
  *   429 { error: 'free_pool_full' }                     今日 50 席免費名額已滿（不浪費驗證信）
  *   429 { error: 'email_daily_cap' }                    今日 Gmail 寄信額度已滿
@@ -34,6 +37,8 @@ import {
 
 export async function sendOtp(request: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
   if (request.method === 'OPTIONS') return preflight(request);
+  const blocked = forbiddenOrigin(request);
+  if (blocked) return blocked;
 
   try {
     const body = await readJsonBody<{ email?: unknown }>(request, 4 * 1024);
@@ -71,6 +76,10 @@ export async function sendOtp(request: HttpRequest, context: InvocationContext):
       });
     }
 
+    // 同一 IP 10 分鐘內最多寄出 5 封驗證信（防腳本換假信箱消耗 Gmail 每日額度）
+    const ipLimit = await checkLimit(request, 'OtpIp');
+    if (ipLimit.limited) return rateLimitedResponse(request, ipLimit.retryAfter, '同一網路在 10 分鐘內寄送驗證碼');
+
     const issued = await issueOtp(email);
     if (issued.status === 'cooldown') {
       return json(request, 429, {
@@ -100,6 +109,7 @@ export async function sendOtp(request: HttpRequest, context: InvocationContext):
     try {
       const mail = renderOtpEmail(issued.code);
       await sendMail({ to: email, subject: mail.subject, html: mail.html, text: mail.text });
+      await recordHit(request, 'OtpIp').catch((err) => context.warn('[sendOtp] IP 計數失敗（不影響寄信）', err));
     } catch (err) {
       context.error('[sendOtp] 驗證信寄送失敗', err);
       await rollbackIssuedOtp(email, issued.previous);

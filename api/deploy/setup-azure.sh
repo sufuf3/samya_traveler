@@ -137,7 +137,7 @@ SETTINGS=(
   "DAILY_GLOBAL_LIMIT=50"
   "VIP_POOL_LIMIT=30"
   "PORTALY_URL=https://portaly.cc/samya_traveler"
-  "ALLOWED_ORIGINS=$ALLOWED_ORIGIN,http://localhost:1313"
+  "ALLOWED_ORIGINS=$ALLOWED_ORIGIN,http://localhost:1313,http://127.0.0.1:5500"
   "SLOWMATE_APP_URL=$ALLOWED_ORIGIN/slowmate/"
   "OTP_MAX_SENDS_PER_DAY=5"
 )
@@ -157,9 +157,9 @@ az functionapp config appsettings set -n "$APP_NAME" -g "$RESOURCE_GROUP" -o non
 has_setting ADMIN_EMAILS && az functionapp config appsettings delete -n "$APP_NAME" -g "$RESOURCE_GROUP" --setting-names ADMIN_EMAILS -o none
 
 # ---------- 7. CORS ----------
-say "設定 CORS：$ALLOWED_ORIGIN、http://localhost:1313"
+say "設定 CORS：$ALLOWED_ORIGIN、http://localhost:1313、http://127.0.0.1:5500"
 CURRENT_ORIGINS="$(az functionapp cors show -n "$APP_NAME" -g "$RESOURCE_GROUP" --query allowedOrigins -o tsv 2>/dev/null || true)"
-for origin in "$ALLOWED_ORIGIN" "http://localhost:1313"; do
+for origin in "$ALLOWED_ORIGIN" "http://localhost:1313" "http://127.0.0.1:5500"; do
   grep -qxF "$origin" <<<"$CURRENT_ORIGINS" || az functionapp cors add -n "$APP_NAME" -g "$RESOURCE_GROUP" --allowed-origins "$origin" -o none
 done
 

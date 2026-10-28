@@ -22,7 +22,7 @@
     "VIP_POOL_LIMIT": "30",
     "ADMIN_SECRET": "<64-char-random-hex; openssl rand -hex 32>",
     "PORTALY_URL": "https://portaly.cc/samya_traveler",
-    "ALLOWED_ORIGINS": "https://samya-traveler.github.io,http://localhost:1313,http://localhost:8080,http://127.0.0.1:8080",
+    "ALLOWED_ORIGINS": "https://samya-traveler.github.io,http://localhost:1313,http://127.0.0.1:5500",
     "SLOWMATE_APP_URL": "https://samya-traveler.github.io/slowmate/",
 
     "OTP_SECRET": "<another-long-random-string-for-otp-hashing>",

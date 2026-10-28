@@ -1,5 +1,5 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions';
-import { BadRequestError, json, preflight, readJsonBody } from '../shared/http';
+import { BadRequestError, forbiddenOrigin, json, preflight, readJsonBody } from '../shared/http';
 import { CODE_MESSAGES, CODE_RE, CodeView, cleanCode, cleanEmail, inspectCode } from '../shared/redeemCodes';
 
 /**
@@ -23,6 +23,8 @@ function validMessage(v: CodeView, isOwner: boolean): string {
 
 export async function checkCode(request: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
   if (request.method === 'OPTIONS') return preflight(request);
+  const blocked = forbiddenOrigin(request);
+  if (blocked) return blocked;
   try {
     const body = await readJsonBody<{ redeem_code?: unknown; email?: unknown }>(request, 1024);
     const code = cleanCode(body.redeem_code);
