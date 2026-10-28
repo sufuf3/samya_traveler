@@ -48,6 +48,7 @@ const C = {
 
 const PORTALY_URL = () => process.env.PORTALY_URL || 'https://portaly.cc/samya_traveler';
 const APP_URL = () => process.env.SLOWMATE_APP_URL || 'https://samya-traveler.github.io/slowmate/';
+const IG_URL = 'https://www.instagram.com/samya_traveler/';
 /** 體驗回饋問卷（完成畫面顯示 2 組 VIP 序號）；可用 App Setting SURVEY_URL 更換 */
 const SURVEY_URL = () => process.env.SURVEY_URL || 'https://forms.gle/WeFcWEu2NrPP8AWy8';
 
@@ -60,7 +61,7 @@ function surveyBlock(): string {
             <tr><td style="padding:18px 18px 8px;font-size:14px;line-height:1.8;color:${C.text};">
               <p style="margin:0 0 8px;font-weight:700;font-size:15px;">🎉 填寫 1 分鐘問卷，免費領【雙人慢旅共享禮（共 2 組 VIP 序號）】！</p>
               <p style="margin:0 0 8px;">喜歡這次 AI 為你梳理的慢旅節奏嗎？歡迎點擊填寫 ${link}！問卷送出後的完成畫面將<strong>直接顯示 2 組 VIP 兌換序號</strong> —— 1 組讓你微調自己的行程，另 1 組可以直接貼進 LINE 群組送給旅伴排他的版本喔！</p>
-              <p style="margin:0;font-size:13px;color:${C.muted};font-style:italic;">（💡 小彩蛋：回網站點選「📸 產生慢旅分享圖」發到 IG 限動或 Threads 標註 @samya_traveler 私訊截圖，還能額外再領 1 次免費額度✨）</p>
+              <p style="margin:0;font-size:13px;color:${C.muted};font-style:italic;">（💡 小彩蛋：將【慢旅分享圖】發至 IG 限動或 Threads 標註 <a href="${IG_URL}" target="_blank" rel="noopener noreferrer" style="color:${C.coral};font-weight:700;">@samya_traveler</a>，追蹤並截圖私訊我的 IG，立即加贈 1 組 VIP 專屬通關序號！）</p>
             </td></tr>
             <tr><td align="center" style="padding:6px 14px 18px;">
               <a href="${escapeHtml(SURVEY_URL())}" target="_blank" style="display:inline-block;padding:10px 18px;border-radius:12px;background:${C.sage};color:#FFFFFF;text-decoration:none;font-weight:700;font-size:14px;">📝 填寫問卷領 2 組 VIP 序號</a>
@@ -73,7 +74,7 @@ function surveyBlock(): string {
 const surveyLines = () => [
   '🎉 填寫 1 分鐘問卷，免費領【雙人慢旅共享禮（共 2 組 VIP 序號）】！',
   `喜歡這次 AI 為你梳理的慢旅節奏嗎？填寫 SlowMate 體驗回饋問卷（${SURVEY_URL()}），送出後的完成畫面將直接顯示 2 組 VIP 兌換序號 —— 1 組微調自己的行程，另 1 組貼進 LINE 群組送給旅伴排他的版本！`,
-  '（💡 小彩蛋：回網站點選「📸 產生慢旅分享圖」發到 IG 限動或 Threads 標註 @samya_traveler 私訊截圖，還能額外再領 1 次免費額度✨）'
+  `（💡 小彩蛋：將【慢旅分享圖】發至 IG 限動或 Threads 標註 @samya_traveler（${IG_URL}），追蹤並截圖私訊我的 IG，立即加贈 1 組 VIP 專屬通關序號！）`
 ];
 
 /** 方案說明（聖誕囤票祭期間改為 7 次 / 14 次加碼包） */
