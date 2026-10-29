@@ -1623,42 +1623,9 @@
       cursor: pointer;
     }
 
-    /* 🗺️ Google Maps 全行程 / 單日地圖 */
-    .btn-maps-all {
-      grid-column: 1 / -1;
-      padding: 12px 16px;
-      border: none;
-      border-radius: var(--radius-md);
-      background: var(--brand-sage);
-      color: #fff;
-      font-family: inherit;
-      font-size: 0.95rem;
-      font-weight: 700;
-      cursor: pointer;
-      box-shadow: var(--shadow-sm);
-    }
-    .btn-maps-all:hover { background: var(--brand-sage-dark); }
-    .section-head {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      flex-wrap: wrap;
-      gap: 8px 12px;
-      margin-bottom: 14px;
-    }
-    .section-head .section-title { margin-bottom: 0; }
-    .btn-maps-mini {
-      padding: 6px 12px;
-      border: 1px solid var(--brand-sage);
-      border-radius: 99px;
-      background: var(--brand-sage-light);
-      color: var(--brand-sage-dark);
-      font-family: inherit;
-      font-size: 0.8rem;
-      font-weight: 700;
-      cursor: pointer;
-    }
-    .btn-maps-mini:hover { background: #D0E2D8; }
+    /* 🗺️ 每日時間軸：使用提示 + 本日路線膠囊 */
+    .timeline-title { margin-bottom: 4px; }
+    .timeline-hint { font-size: 0.76rem; line-height: 1.6; color: var(--text-muted); margin-bottom: 12px; }
     .day-header-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
     .day-map-link {
       flex-shrink: 0;
@@ -1673,96 +1640,6 @@
       white-space: nowrap;
     }
     .day-map-link:hover { background: var(--brand-sage-light); }
-
-    /* 🔖 Google Maps 存清單助手 */
-    .maps-save-card { max-width: 520px; padding: 24px 18px; }
-    .maps-save-tip {
-      font-size: 0.82rem;
-      line-height: 1.65;
-      color: var(--text-muted);
-      background: #F1F6F2;
-      border: 1px dashed #A9C4B3;
-      border-radius: var(--radius-md);
-      padding: 10px 12px;
-      margin-bottom: 10px;
-    }
-    .maps-save-progress { font-size: 0.8rem; font-weight: 700; color: var(--brand-sage-dark); margin-bottom: 8px; }
-    .maps-day { margin-top: 14px; }
-    .maps-day-head {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 8px;
-      padding: 8px 12px;
-      background: var(--bg-subtle);
-      border-radius: var(--radius-md);
-    }
-    .maps-day-head h4 { font-size: 0.92rem; color: var(--text-main); min-width: 0; }
-    .maps-day-head small { display: block; font-size: 0.74rem; font-weight: 400; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .maps-route-link {
-      flex-shrink: 0;
-      font-size: 0.76rem;
-      font-weight: 700;
-      color: var(--text-muted);
-      text-decoration: none;
-      border: 1px solid var(--border-soft);
-      background: #fff;
-      padding: 3px 10px;
-      border-radius: 99px;
-      white-space: nowrap;
-    }
-    .maps-route-link:hover { color: var(--brand-sage-dark); border-color: var(--brand-sage); }
-    .maps-save-rows { list-style: none; margin: 0; padding: 0; }
-    .maps-save-row {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 10px 2px;
-      border-bottom: 1px solid var(--bg-subtle);
-    }
-    .maps-save-row:last-child { border-bottom: none; }
-    .maps-save-info { flex: 1; min-width: 0; }
-    .maps-save-name { font-size: 0.88rem; font-weight: 700; color: var(--text-main); line-height: 1.45; }
-    .maps-slot-pill {
-      display: inline-block;
-      margin-right: 6px;
-      padding: 1px 8px;
-      border-radius: 99px;
-      background: var(--brand-sage-light);
-      color: var(--brand-sage-dark);
-      font-size: 0.7rem;
-      font-weight: 700;
-      vertical-align: 1px;
-    }
-    .maps-query-label { display: flex; align-items: center; gap: 4px; margin-top: 4px; font-size: 0.72rem; color: var(--text-muted); white-space: nowrap; }
-    .maps-query-input {
-      flex: 1;
-      min-width: 0;
-      padding: 4px 8px;
-      border: 1px dashed var(--border-soft);
-      border-radius: var(--radius-sm);
-      background: #FFFDF7;
-      font-family: inherit;
-      font-size: 0.78rem;
-      color: var(--text-main);
-    }
-    .maps-query-input:focus { outline: none; border-color: var(--brand-sage); border-style: solid; }
-    .maps-save-btn {
-      flex-shrink: 0;
-      width: 112px;
-      padding: 8px 8px;
-      border-radius: var(--radius-md);
-      background: #4F6B4A;
-      color: #fff;
-      font-size: 0.78rem;
-      font-weight: 700;
-      line-height: 1.35;
-      text-align: center;
-      text-decoration: none;
-    }
-    .maps-save-btn:hover { background: #3E5639; }
-    .maps-save-btn.is-opened { background: var(--brand-sage-light); color: var(--brand-sage-dark); box-shadow: inset 0 0 0 1px #BFD3C6; }
-    .maps-save-foot { margin-top: 14px; font-size: 0.78rem; color: var(--text-muted); line-height: 1.6; }
 
     .btn-reroute {
       grid-column: 1 / -1;
@@ -2554,7 +2431,7 @@
       #shareCardModal, #shareCardBtn, .admin-entry-btn, .preview-bar, .free-unlock,
       .screen-only, .countdown-badge, .result-notice,
       .spot-tool-btn, .add-spot-pill, .add-spot-box, .day-remark, .shopping-add, .shop-del,
-      .shopping-sub, .shopping-card.is-empty, .btn-reroute, .btn-maps-all, .btn-maps-mini, .day-map-link {
+      .shopping-sub, .shopping-card.is-empty, .btn-reroute, .day-map-link {
         display: none !important;
       }
       .print-only { display: block !important; }
@@ -2820,7 +2697,6 @@
 
       <div class="action-bar">
         <button type="button" class="btn-share-card" id="shareCardBtn">📸 產生慢旅分享圖 (IG / Threads)</button>
-        <button type="button" class="btn-maps-all" data-maps-all>🗺️ 在 Google Maps 查看全部景點 / 存清單</button>
         <button type="button" class="btn-secondary" id="openEmailModalBtn">✉️ 寄送行程到信箱</button>
         <button type="button" class="btn-secondary" id="copyTextBtn">📋 複製純文字行程</button>
         <button type="button" class="btn-reroute" id="rerouteBtn">🔄 帶回表單讓 AI 重新順路</button>
@@ -2893,10 +2769,8 @@
 
       <!-- 每日行程時間軸 -->
       <div class="card screen-only">
-        <div class="section-head">
-          <h2 class="section-title">🌿 每日慢旅時間軸</h2>
-          <button type="button" class="btn-maps-mini" data-maps-all>🗺️ 在 Google Maps 查看全部景點 / 存清單</button>
-        </div>
+        <h2 class="section-title timeline-title">🌿 每日慢旅時間軸</h2>
+        <p class="timeline-hint">💡 點擊各景點的「📍 導航」可於 Google Maps 查看地標並加入您的「儲存清單」；點擊每日右上角「🗺️ 本日路線」可預覽當日動線。</p>
         <div class="day-tabs-wrapper" id="dayTabs" role="tablist" aria-label="選擇行程日期"></div>
         <div id="dayContentBox" role="tabpanel" tabindex="0"></div>
       </div>
@@ -3045,18 +2919,6 @@
       <p class="modal-body" id="limitBody"></p>
       <button type="button" class="btn-primary" id="limitCodeBtn" hidden>🔑 我有序號，開啟 VIP 保留通道</button>
       <button type="button" class="btn-secondary" data-close-modal="limitModal" id="limitCloseBtn" style="width:100%;margin-top:10px;">好的，明天再來</button>
-    </div>
-  </div>
-
-  <!-- 🔖 Google Maps 景點快速存清單助手 -->
-  <div class="modal-backdrop" id="mapsSaveModal" role="dialog" aria-modal="true" aria-labelledby="mapsSaveTitle">
-    <div class="modal-card maps-save-card">
-      <button type="button" class="modal-close" data-close-modal="mapsSaveModal" aria-label="關閉">&times;</button>
-      <h3 class="modal-title" id="mapsSaveTitle">🔖 快速將景點存進 Google Maps 清單</h3>
-      <p class="maps-save-tip">💡 Google Maps 需於單一地標頁面點擊「🔖 儲存」才能加入私人清單。點擊下方景點即可直接喚起該地標頁面並一鍵收藏（已點擊的項目會自動標記 ✅）：</p>
-      <p class="maps-save-progress" id="mapsSaveProgress" role="status" aria-live="polite"></p>
-      <div id="mapsSaveList"></div>
-      <p class="maps-save-foot">🚗 想看景點之間的相對位置與距離？點每天標題旁的「看本日路線」，就能在 Google Maps 看當天的串連路線。</p>
     </div>
   </div>
 
@@ -4135,11 +3997,6 @@
 
       // 🔄 帶回表單讓 AI 重新順路
       $('rerouteBtn').addEventListener('click', rerouteToForm);
-
-      // 🔖 Google Maps 景點快速存清單助手（操作列 + 時間軸標題各一顆）
-      document.querySelectorAll('[data-maps-all]').forEach((b) => b.addEventListener('click', openMapsSaveModal));
-      $('mapsSaveList').addEventListener('click', onMapsSaveClick);
-      $('mapsSaveList').addEventListener('input', onMapsQueryInput);
 
       // 慢旅風格快捷標籤
       document.querySelectorAll('.vibe-chip').forEach((chip) => chip.addEventListener('click', () => toggleVibe(chip)));
@@ -5390,16 +5247,9 @@
       return /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(color || '') ? color : '#5B7B6A';
     }
 
-    function mapsUrl(title, destination) {
-      return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(title + ' ' + destination)}`;
-    }
-
-    /** 使用者新增 / 微調過的地點：以「目的地 + 新名稱」搜尋，避免同名店家跑到別的城市 */
+    /** 📍 導航：清洗後的地標搜尋網址（使用者新增 / 微調的地點以「目的地 + 名稱」搜尋） */
     function itemMapsUrl(item, destination) {
-      if (item.user_added || item.user_edited) {
-        return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(destination + ' ' + (item.title || ''))}`;
-      }
-      return mapsUrl(item.title || '', destination);
+      return mapsSearchUrl(spotQuery(item, destination));
     }
 
     function renderSingleDayTimeline(dayObj, destination, idx, { animate = true } = {}) {
@@ -5445,10 +5295,9 @@
       }).join('');
 
       const dayLabel = dayObj.day_index || idx + 1;
-      // 全行程超過 10 個景點（總覽地圖只放得下前 10 個）時，每天附上「本日地圖」
-      const totalSpots = (state.trip?.daily_itinerary || []).reduce((n, d) => n + (d.timeline?.length || 0), 0);
-      const dayMapHtml = interactive && dayObj.timeline?.length && totalSpots > MAPS_MAX_SPOTS
-        ? `<a class="day-map-link" href="${escapeHtml(dayRouteUrl(idx))}" target="_blank" rel="noopener noreferrer" data-day-map aria-label="在 Google Maps 開啟 Day ${escapeHtml(dayLabel)} 所有景點">🗺️ 本日地圖</a>`
+      const routeUrl = interactive ? dayRouteUrl(dayObj, destination) : '';
+      const dayMapHtml = routeUrl
+        ? `<a class="day-map-link" href="${escapeHtml(routeUrl)}" target="_blank" rel="noopener noreferrer" aria-label="在 Google Maps 預覽 Day ${escapeHtml(dayLabel)} 路線">🗺️ 本日路線</a>`
         : '';
       let addHtml = '';
       let remarkHtml = '';
@@ -5800,12 +5649,11 @@
       renderShoppingList();
     }
 
-    /* ---------- 🔖 Google Maps 景點快速存清單助手 ----------
-     * Google Maps 只有在「單一地標頁面」才有「🔖 儲存」按鈕，路線（/maps/dir/）模式沒有；
-     * 而且路線網址只要有一個點找不到就整頁報錯。所以每個景點各自用清洗過的關鍵字開搜尋頁，
-     * 路線圖只留給「🚗 看本日路線」。已開啟狀態與自訂關鍵字存在 edits.maps，從 App 切回來也還在。
+    /* ---------- 🗺️ Google Maps：單一景點導航（清洗後的地標關鍵字）＋ 🗺️ 本日路線 ----------
+     * 單一景點用搜尋網址（地標頁才有「🔖 儲存」）；路線網址只要有一個點找不到就整頁報錯，
+     * 所以只在「本日路線」用，而且只串當天清洗後的 2~4 個核心地標。
      */
-    const MAPS_MAX_SPOTS = 10; // 路線網址的途經點有上限
+    const DAY_ROUTE_MAX = 4;
     const SPOT_SPLIT_RE = /[、，,・･\/／＆&＋+→➔～~|｜]|與|及|和/;
     // 由長到短排列，避免「返回」先吃掉「返回市區」的一部分
     const SPOT_NOISE = [
@@ -5839,116 +5687,24 @@
       return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
     }
 
-    /** 路線網址（只給「看本日路線」用）：1 個點退回搜尋頁 */
-    function mapsDirUrl(queries) {
-      const list = queries.filter(Boolean).slice(0, MAPS_MAX_SPOTS);
-      if (list.length <= 1) return mapsSearchUrl(list[0] || '');
+    /** 景點的搜尋關鍵字：使用者自己輸入的名稱照用（冠上目的地），AI 標題先清洗 */
+    function spotQuery(item, destination) {
+      const dest = String(destination || '').trim();
+      const title = String(item.title || '').trim();
+      if (item.user_added || item.user_edited) return !dest || title.includes(dest) ? title : `${dest} ${title}`;
+      return cleanSpotQuery(dest, title);
+    }
+
+    /** 本日路線：當天前 2~4 個不重複的地標；不足 2 個時不提供 */
+    function dayRouteUrl(dayObj, destination) {
+      const list = [...new Set((dayObj?.timeline || []).map((t) => spotQuery(t, destination)).filter(Boolean))].slice(0, DAY_ROUTE_MAX);
+      if (list.length < 2) return '';
       const middle = list.slice(1, -1);
       return 'https://www.google.com/maps/dir/?api=1' +
         `&origin=${encodeURIComponent(list[0])}` +
         `&destination=${encodeURIComponent(list[list.length - 1])}` +
         (middle.length ? `&waypoints=${encodeURIComponent(middle.join('|'))}` : '') +
         '&travelmode=transit';
-    }
-
-    function mapsMemo() {
-      if (!state.edits) return { opened: {}, queries: {} };
-      const m = state.edits.maps || (state.edits.maps = {});
-      m.opened = m.opened || {};
-      m.queries = m.queries || {};
-      return m;
-    }
-
-    function saveMapsMemo() {
-      if (state.editsPersist && state.edits) store.set(STORAGE_EDITS_KEY, JSON.stringify(state.edits));
-    }
-
-    const spotKey = (dayIdx, itemIdx, title) => `${dayIdx}:${itemIdx}:${title || ''}`;
-
-    /** 某天每個景點的搜尋關鍵字（使用者改過的優先） */
-    function daySpotQueries(dayIdx) {
-      const trip = state.trip;
-      const day = trip?.daily_itinerary?.[dayIdx];
-      const dest = trip?.trip_summary?.destination || '';
-      const memo = mapsMemo();
-      return (day?.timeline || []).map((t, i) => {
-        const key = spotKey(dayIdx, i, t.title);
-        return { key, item: t, query: memo.queries[key] || cleanSpotQuery(dest, t.title) };
-      }).filter((x) => x.query);
-    }
-
-    function dayRouteUrl(dayIdx) {
-      return mapsDirUrl(daySpotQueries(dayIdx).map((x) => x.query));
-    }
-
-    function renderMapsSaveList() {
-      const days = state.trip?.daily_itinerary || [];
-      const memo = mapsMemo();
-      $('mapsSaveList').innerHTML = days.map((d, dayIdx) => {
-        const spots = daySpotQueries(dayIdx);
-        if (!spots.length) return '';
-        const label = `Day ${escapeHtml(d.day_index || dayIdx + 1)}${d.date ? ` · ${escapeHtml(formatTabDate(d.date))}` : ''}`;
-        const rows = spots.map(({ key, item, query }) => {
-          const opened = !!memo.opened[key];
-          return `
-          <li class="maps-save-row">
-            <div class="maps-save-info">
-              <p class="maps-save-name"><span class="maps-slot-pill">${escapeHtml(item.time_slot || '')}</span>${escapeHtml(item.title)}</p>
-              <label class="maps-query-label">🔍 搜尋<input type="text" class="maps-query-input" data-spot-key="${escapeHtml(key)}" value="${escapeHtml(query)}" maxlength="60" aria-label="${escapeHtml(item.title)} 的 Google Maps 搜尋關鍵字" /></label>
-            </div>
-            <a class="maps-save-btn${opened ? ' is-opened' : ''}" href="${escapeHtml(mapsSearchUrl(query))}" target="_blank" rel="noopener noreferrer" data-spot-open="${escapeHtml(key)}">${opened ? '✅ 已開啟' : '🔖 去 Google Maps 儲存 ➔'}</a>
-          </li>`;
-        }).join('');
-        return `
-        <section class="maps-day">
-          <div class="maps-day-head">
-            <h4>${label}<small>${escapeHtml(d.day_title || '')}</small></h4>
-            <a class="maps-route-link" href="${escapeHtml(dayRouteUrl(dayIdx))}" target="_blank" rel="noopener noreferrer" data-route-day="${dayIdx}">🚗 看本日路線</a>
-          </div>
-          <ul class="maps-save-rows">${rows}</ul>
-        </section>`;
-      }).join('') || '<p class="empty-note">目前行程中沒有可儲存的景點。</p>';
-      updateMapsSaveProgress();
-    }
-
-    function updateMapsSaveProgress() {
-      const btns = $('mapsSaveList').querySelectorAll('[data-spot-open]');
-      const done = Array.from(btns).filter((b) => b.classList.contains('is-opened')).length;
-      $('mapsSaveProgress').textContent = btns.length ? `已開啟 ${done} / ${btns.length} 個景點${done === btns.length ? ' · 全部存好了，旅途見！🎒' : ''}` : '';
-    }
-
-    function openMapsSaveModal() {
-      if (!state.trip) return;
-      renderMapsSaveList();
-      openModal('mapsSaveModal');
-    }
-
-    function onMapsSaveClick(e) {
-      const btn = e.target.closest('[data-spot-open]');
-      if (!btn) return;
-      // 交給 <a target="_blank"> 開啟（手機會直接喚起 Google Maps App），這裡只負責標記已開啟
-      mapsMemo().opened[btn.dataset.spotOpen] = true;
-      saveMapsMemo();
-      btn.classList.add('is-opened');
-      btn.textContent = '✅ 已開啟';
-      updateMapsSaveProgress();
-    }
-
-    function onMapsQueryInput(e) {
-      const input = e.target.closest('[data-spot-key]');
-      if (!input) return;
-      const key = input.dataset.spotKey;
-      const query = input.value.replace(/\s+/g, ' ').trim();
-      const memo = mapsMemo();
-      if (query) memo.queries[key] = query;
-      else delete memo.queries[key];
-      saveMapsMemo();
-      const row = input.closest('.maps-save-row');
-      const btn = row.querySelector('[data-spot-open]');
-      btn.href = mapsSearchUrl(query || cleanSpotQuery(state.trip?.trip_summary?.destination || '', row.querySelector('.maps-save-name').lastChild.textContent));
-      const dayIdx = Number(key.split(':')[0]);
-      const route = $('mapsSaveList').querySelector(`[data-route-day="${dayIdx}"]`);
-      if (route) route.href = dayRouteUrl(dayIdx);
     }
 
     /* ---------- 🔄 帶回表單讓 AI 重新順路 ---------- */
