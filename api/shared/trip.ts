@@ -57,6 +57,8 @@ export interface TripPlan {
     transport_passes: { name: string; description: string; buy_timing: string }[];
     advance_reservations: { target: string; deadline_note: string; tips: string }[];
     todo_checklist: string[];
+    /** 選填：AI 推薦的 3 項在地伴手禮 / 好物（舊快取行程沒有此欄位） */
+    shopping_list?: string[];
   };
   daily_itinerary: DayPlan[];
 }
@@ -99,6 +101,12 @@ function optionalTimes(summary: Record<string, unknown>): { arrival_time?: strin
 }
 
 /** 結果頁「🧭 慢旅動線與日均花費速覽」的三個選填欄位 */
+/** 伴手禮清單：最多 10 項、每項 80 字；沒有內容時整個欄位省略 */
+function shoppingList(v: unknown): { shopping_list?: string[] } {
+  const list = arr(v, 10).map((t) => str(t, 80)).filter(Boolean);
+  return list.length ? { shopping_list: list } : {};
+}
+
 function magazineFields(summary: Record<string, unknown>): Pick<TripPlan['trip_summary'], 'route_ribbon' | 'budget_estimate' | 'retention_stat_note'> {
   const ribbon = arr(summary.route_ribbon, 12).map((x) => str(x, 30)).filter(Boolean);
   const b = isObj(summary.budget_estimate) ? summary.budget_estimate : {};
@@ -151,7 +159,8 @@ export function sanitizeTrip(input: unknown, opts: SanitizeOptions = {}): TripPl
 
   const days = (expected ? daysIn.slice(0, expected.length) : daysIn).map((d, idx): DayPlan => {
     const day = isObj(d) ? d : {};
-    const timelineIn = arr(day.timeline, 6);
+    // 寄信（寬鬆模式）時行程可能含使用者自行加入的地點，放寬到每天 12 個
+    const timelineIn = arr(day.timeline, opts.lenient ? 12 : 6);
     if (!opts.lenient && timelineIn.length === 0) {
       throw new TripValidationError(`第 ${idx + 1} 天缺少 timeline`);
     }
@@ -208,7 +217,9 @@ export function sanitizeTrip(input: unknown, opts: SanitizeOptions = {}): TripPl
         const o = isObj(r) ? r : {};
         return { target: str(o.target, 120), deadline_note: str(o.deadline_note, 80), tips: str(o.tips, 300) };
       }).filter((r) => r.target),
-      todo_checklist: arr(prepIn.todo_checklist, 20).map((t) => str(t, 160)).filter(Boolean)
+      todo_checklist: arr(prepIn.todo_checklist, 20).map((t) => str(t, 160)).filter(Boolean),
+      // 選填：AI 漏掉時不讓整份行程失敗，前端照樣顯示可自行新增的購物清單
+      ...shoppingList(prepIn.shopping_list)
     },
     daily_itinerary: days
   };
