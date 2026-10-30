@@ -330,8 +330,8 @@ export async function unlockCode(code: string, lockId: string): Promise<void> {
 }
 
 export const CODE_MESSAGES: Record<CodeProblem, string> = {
-  not_found: '🌿 查無此序號，請確認序號是否輸入正確。',
-  exhausted: '🌿 此序號額度已全數使用完畢（若是限量活動公用碼，代表名額已被搶光囉）！',
+  not_found: '🌿 此序號額度已全數使用完畢或序號無效。',
+  exhausted: '🌿 此序號額度已全數使用完畢或序號無效。',
   companion_used: '🌿 這組旅伴分享序號您已經體驗過 1 次囉！若想繼續微調行程，歡迎贊助屬於自己的慢旅序號 ☕（本次未扣除額度）。',
   email_used: '🌿 這組活動限量 VIP 序號每個信箱限體驗 1 次喔！若喜歡 SlowMate，歡迎贊助解鎖更多專屬額度 ☕（本次未扣除額度）。',
   processing: '此序號正在生成行程中，請稍候 1~2 分鐘再試（若超過 3 分鐘仍未完成會自動釋放）。'

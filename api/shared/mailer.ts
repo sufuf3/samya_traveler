@@ -107,6 +107,8 @@ export interface CodeEmailInput {
   code: string;
   magicLink: string;
   sponsorName?: string;
+  /** 買家信箱：多人方案的共享規則會寫出「買家本人信箱（…）」 */
+  ownerEmail?: string;
   planName: string;
   totalUses: number;
   allowSameEmail: boolean;
@@ -115,15 +117,15 @@ export interface CodeEmailInput {
 }
 
 /** 共享規則說明（HTML 與純文字共用；<strong> 在純文字中會被移除） */
-function codeUsageLines(totalUses: number, allowSameEmail: boolean): string[] {
+function codeUsageLines(totalUses: number, allowSameEmail: boolean, ownerEmail = ''): string[] {
   const lines =
     totalUses <= 1
       ? ['這組序號可完整生成 <strong>1 次</strong>慢旅行程，不限信箱，也可以轉贈給旅伴使用。']
       : allowSameEmail
         ? [`共 <strong>${totalUses} 次</strong>額度，<strong>不限本人或旅伴信箱</strong>，大家都可以自由使用，直到 ${totalUses} 次用完。`]
         : [
-            `<strong>你本人的信箱</strong>可以重複使用全部 <strong>${totalUses} 次</strong>（例如試排不同路線版本）。`,
-            '也可以把序號丟進 LINE 群組分給旅伴：<strong>每位旅伴的信箱限免費體驗 1 次</strong>（同樣從總次數中扣除）。'
+            `<strong>買家本人信箱${ownerEmail ? `（${escapeHtml(ownerEmail)}）` : ''}</strong>可重複使用全部 <strong>${totalUses} 次</strong>；分享給旅伴時，<strong>每位旅伴信箱限免費體驗 1 次</strong>。`,
+            '可以直接把序號丟進 LINE 群組分給親友團（旅伴使用的次數同樣從總次數中扣除）。'
           ];
   lines.push('只有在行程「成功生成」後才會扣次數；若遇到當日名額已滿或生成失敗，額度會完整保留，序號也沒有使用期限。');
   return lines;
@@ -135,7 +137,7 @@ const XMAS_GIVEAWAY_HTML =
 export function renderCodeEmail(input: CodeEmailInput): { subject: string; html: string; text: string } {
   const total = Math.max(1, input.totalUses || 1);
   const name = input.sponsorName ? `${input.sponsorName}，` : '';
-  const usage = codeUsageLines(total, input.allowSameEmail);
+  const usage = codeUsageLines(total, input.allowSameEmail, input.ownerEmail);
   const html = `<!DOCTYPE html>
 <html lang="zh-TW"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
 <body style="margin:0;padding:0;background:#FBF9F5;font-family:'Noto Sans TC',-apple-system,BlinkMacSystemFont,'PingFang TC','Microsoft JhengHei',sans-serif;">

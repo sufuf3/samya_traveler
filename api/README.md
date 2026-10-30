@@ -59,18 +59,18 @@ Email 當 RowKey 時只會轉義 Table Storage 不允許的字元（`/ \ # ?`、
 
 | 模式 | 金額 | 方案 | 前綴 | `TotalUses` | `AllowSameEmail` | `CampaignTag` |
 |---|---|---|---|---|---|---|
-| `NORMAL`（預設） | ≥ 488 | ✨ 慢旅玩家全票 | `SM10-` | 10 | `false` | `PORTALY_NORMAL` |
-| | ≥ 300 | 🌿 旅伴同樂包 | `SM5-` | 5 | `false` | `PORTALY_NORMAL` |
-| | 其他（含 88、無法解析） | ☕ 單人微調體驗 | `SM1-` | 1 | `true` | `PORTALY_NORMAL` |
+| `NORMAL`（預設） | ≥ 299 | 🍱 慢旅玩家同樂包 | `SM10-` | 10 | `false` | `PORTALY_NORMAL` |
+| | ≥ 99 | 🌿 單趟旅程微調包 | `SM3-` | 3 | `true` | `PORTALY_NORMAL` |
+| | 其他（含 69、無法解析） | ☕ 單次試調體驗 | `SM1-` | 1 | `true` | `PORTALY_NORMAL` |
 | `XMAS` | ≥ 488 | 🎅 2027 全年慢旅年票 | `XMAS14-` | 14 | `false` | `PORTALY_XMAS` |
 | | ≥ 300 | 🦌 聖誕旅伴加碼包 | `XMAS7-` | 7 | `false` | `PORTALY_XMAS` |
 | | ≥ 199 | 🎄 聖誕雙人福袋 | `XMAS3-` | 3 | `true` | `PORTALY_XMAS` |
-| | 其他（含 88） | ☕ 單人微調體驗 | `SM1-` | 1 | `true` | `PORTALY_NORMAL` |
+| | 其他 | ☕ 單次試調體驗 | `SM1-` | 1 | `true` | `PORTALY_NORMAL` |
 
 `AllowSameEmail`：
 
-- `true`：不限信箱，誰都可以用到次數用完（單次碼、聖誕雙人福袋、`GIFT10-`、`EARLY1-` 等）。
-- `false` 且有 `OwnerEmail`（300 / 488 多人方案）：買家本人可重複使用到次數歸零；其他旅伴信箱每個限用 1 次（記在 `UsedByEmails`）。
+- `true`：不限信箱，誰都可以用到次數用完（69 單次碼、99 三次微調包、聖誕雙人福袋、`GIFT10-`、`EARLY1-` 等）。
+- `false` 且有 `OwnerEmail`（299 同樂包；舊的 300 / 488 方案序號照舊有效）：買家本人可重複使用到次數歸零；其他旅伴信箱每個限用 1 次（記在 `UsedByEmails`）。
 - `false` 且 `OwnerEmail = ""`（戰情室公用碼，例如 `NOV-VIP`）：每個信箱限用 1 次。
 
 「每個信箱限用 1 次」以單一序號為單位：同一信箱可以各用 `SURVEY-VIP1`、`SURVEY-VIP2` 一次。完整的使用紀錄存在 `RedeemCodeUsers` 資料表（PartitionKey = 序號、RowKey = 小寫 email）；
@@ -184,7 +184,7 @@ OTP 只有在行程「成功生成」後才作廢；AI 生成失敗時，10 分�
 | `FREE_DAILY_LIMIT`（舊名 `DAILY_GLOBAL_LIMIT`） | 50（每日免費席） |
 | `VIP_POOL_LIMIT` | 30（每日序號保留席） |
 | `SURVEY_URL` | `https://forms.gle/WeFcWEu2NrPP8AWy8`（行程信「雙人慢旅共享禮」問卷連結） |
-| `PROMO_MODE` | `NORMAL`（常態 88 / 300 / 488）；`XMAS` 開啟聖誕囤票祭（199 / 300 / 488） |
+| `PROMO_MODE` | `NORMAL`（常態 69 / 99 / 299）；`XMAS` 開啟聖誕囤票祭（199 / 300 / 488） |
 | `EMAIL_DAILY_CAP` | 400 |
 | `AI_TIMEOUT_MS` | 120000 |
 | `MAIL_FROM_NAME` / `MAIL_REPLY_TO` | `SlowMate · AI 慢旅行程規劃助手` / 空 |
@@ -230,8 +230,8 @@ Portaly 訂單通知寄到個人 Gmail（`littlebear.samya@gmail.com`）。Logic
 
 ## Logic App 串接 generateCode（替代方案）
 
-Portaly 贊助採「隨喜三階支持」：NT$ 88（輕量解鎖）/ 150（標準支持）/ 300（深度熱情）。三階權益完全一致，一次贊助換一組一次性序號。
-`amount` 可傳 `150`、`"150"` 或 `"NT$ 150"`，會記錄在序號上並對應 `tier`；非三階金額仍照常發碼，只在記錄中留下警告。
+Portaly 贊助採三階定價：NT$ 69（1 次）/ 99（3 次）/ 299（10 次），對應方案見上方「贊助方案與多次數序號」。
+`amount` 可傳 `99`、`"99"` 或 `"NT$ 99"`，會記錄在序號上；無法解析或低於 69 時仍照常發 1 次碼，只在記錄中留下警告。
 
 觸發條件：收到 Portaly 贊助通知信。接著加入一個 HTTP 動作，設定如下：
 

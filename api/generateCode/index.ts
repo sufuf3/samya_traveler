@@ -21,7 +21,7 @@ import { CODE_PK, TABLES, getTable } from '../shared/storage';
  * ── 模式 A：Portaly 贊助自動發碼（Google Apps Script / Logic App 呼叫）───────────────
  *   Body：{ email（或 sponsor_email）, amount, order_id?, sponsor_name?, notify? }
  *   依金額與 App Setting PROMO_MODE（NORMAL / XMAS）決定方案（見 shared/plans.ts）：
- *     NORMAL：>= 488 SM10-（10 次）、>= 300 SM5-（5 次）、其他 SM1-（1 次）
+ *     NORMAL：>= 299 SM10-（10 次，旅伴每信箱 1 次）、>= 99 SM3-（3 次，不限信箱）、其他 SM1-（1 次）
  *     XMAS  ：>= 488 XMAS14-（14 次）、>= 300 XMAS7-（7 次）、>= 199 XMAS3-（3 次）、其他 SM1-（1 次）
  *   寫入 RedeemCodes 後以 Gmail 寄出序號信（方案名稱、總次數、共享規則、一鍵帶入連結 ?code=…&email=…）。
  *   認證（擇一）：?code= / x-functions-key / x-slowmate-secret 等於 GENERATE_CODE_SECRET、GENERATE_CODE_FUNCTION_KEY 或 ADMIN_SECRET。
@@ -112,7 +112,7 @@ async function handlePortaly(request: HttpRequest, context: InvocationContext, b
   const notify = body.notify !== false && body.notify !== 'false';
   const mode = promoMode();
   const plan = planForAmount(amount, mode);
-  if (amount < 88) context.warn(`[generateCode] 贊助金額無法解析或低於 88：${amount}（仍照常發 1 次碼）`);
+  if (amount < 69) context.warn(`[generateCode] 贊助金額無法解析或低於 69：${amount}（仍照常發 1 次碼）`);
 
   // 冪等：只有「相同且非空的 order_id」才回傳同一組序號
   if (orderId) {
@@ -156,6 +156,7 @@ async function handlePortaly(request: HttpRequest, context: InvocationContext, b
         code,
         magicLink: link,
         sponsorName,
+        ownerEmail,
         planName: plan.name,
         totalUses: plan.totalUses,
         allowSameEmail: plan.allowSameEmail,
