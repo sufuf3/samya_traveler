@@ -1,0 +1,38 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "FUNCTIONS_WORKER_RUNTIME": "node",
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "AZURE_STORAGE_CONNECTION_STRING": "UseDevelopmentStorage=true",
+
+    "AZURE_OPENAI_ENDPOINT": "https://<your-aoai-resource>.openai.azure.com/",
+    "AZURE_OPENAI_API_KEY": "<your-azure-openai-key>",
+    "AZURE_OPENAI_DEPLOYMENT": "gpt-4.1",
+    "AZURE_OPENAI_API_VERSION": "2025-01-01-preview",
+    "AI_TIMEOUT_MS": "120000",
+
+    "GMAIL_USER": "littlebear.samya@gmail.com",
+    "GMAIL_APP_PASSWORD": "<16-char-google-app-password>",
+    "MAIL_FROM_NAME": "SlowMate · AI 慢旅行程規劃助手",
+    "PROMO_MODE": "NORMAL",
+    "MAIL_REPLY_TO": "",
+    "EMAIL_DAILY_CAP": "400",
+
+    "DAILY_GLOBAL_LIMIT": "50",
+    "VIP_POOL_LIMIT": "30",
+    "ADMIN_SECRET": "<64-char-random-hex; openssl rand -hex 32>",
+    "PORTALY_URL": "https://portaly.cc/samya_traveler",
+    "ALLOWED_ORIGINS": "https://samya-traveler.github.io,http://localhost:1313,http://127.0.0.1:5500",
+    "SLOWMATE_APP_URL": "https://samya-traveler.github.io/slowmate/",
+
+    "OTP_SECRET": "<another-long-random-string-for-otp-hashing>",
+    "OTP_MAX_SENDS_PER_DAY": "5",
+    "DISPOSABLE_EXTRA_DOMAINS": "",
+
+    "GENERATE_CODE_SECRET": "<long-random-string-shared-with-logic-app>",
+    "GENERATE_CODE_FUNCTION_KEY": ""
+  },
+  "Host": {
+    "CORS": "*"
+  }
+}
