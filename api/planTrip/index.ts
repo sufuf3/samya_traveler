@@ -211,6 +211,13 @@ ${season.guidance}
 - budget_estimate 以新台幣估算「每人當地花費」：依目的地實際物價與本行程的餐飲、咖啡、市區交通、門票 / 拜觀料、體驗課程推算，不含國際機票與住宿。daily_average_twd 給每日區間（例如「NT$ 2,200 ~ 2,800 / 日」）；total_local_twd 依旅遊天數給整趟概算（例如「約 NT$ 12,500 / 人（5日）」）；budget_note 一句話列出包含的項目，並註明不含國際機票與住宿、實際依個人豐儉調整。
 - retention_stat_note 是一句以「✨ 慢旅減法原則：」開頭的減法宣言，說明本行程每日只保留 2～3 個重點、把時間留給留白與散步。不要編造百分比或任何統計數字。
 - pre_trip_prep.shopping_list 是「慢旅伴手禮＆購物清單」：剛好 3 項，推薦最能代表目的地、在地人也會買、非觀光客陷阱的伴手禮或在地好物（例如老鋪和菓子、職人器皿、在地超市才買得到的調味料），每項 40 字內，格式為「品名：一句推薦理由」，只推薦真實存在的品項，不要寫價格。
+- timeline 每個景點的旅圖匯出欄位（必須填寫，方便使用者匯入地圖 App）：
+  - time：24 小時制「HH:MM」，依慢旅節奏推算實際抵達時間（例如上午 09:30、下午 14:00、傍晚 17:30），同一天依序遞增，並符合抵達 / 離境時間。
+  - title：景點名稱用當地常見寫法或常見繁中名稱，40 字內，寫得出能在地圖上搜尋到的地標（不要寫成句子）。
+  - address：當地語言的地址（例如「京都府京都市東山区清水1丁目294」），120 字內；不確定門牌時寫到町名 / 街道即可，不要杜撰門牌。
+  - transport_tag.lutu_code 只能是 walk、train、subway、bus、taxi、flight 其中之一，對應 type（步行→walk；電車/JR/高鐵/台鐵/渡輪→train；地鐵→subway；巴士→bus；計程車/自行車/開車→taxi；飛機→flight）。
+  - transport_tag.duration：從上一個景點過來的交通時間，12 字內，例如「約 15 分」；當天第一個景點填空字串 ""。
+  - tags：最多 4 個景點標籤，每個 6 個字以內（例如「世界遺產」「老街散策」「拍照」）。
 - svg_theme 只能是 kyoto（京都/古都/神社寺院）、tokyo（大都市/城市景觀）、nature_mountain（山林/溫泉/高原）、ocean_beach（海島/海邊）、default_train（其他或鐵道小鎮）其中之一。
 - daily_itinerary 的天數必須與使用者提供的日期完全一致，day_index 從 1 開始、date 與使用者提供的日期逐一對應。
 - stay_info 建議住宿「區域」與旅宿氛圍，不要指名特定飯店品牌。
@@ -238,7 +245,7 @@ ${density}
 【輸出格式（非常重要）】
 - 只輸出一個合法的 JSON 物件，不要任何說明文字，不要使用 \`\`\`json 或任何 Markdown 標籤。
 - JSON 結構必須完全符合下列欄位（不可增減欄位、不可改名）：
-{"trip_summary":{"destination":"","theme_title":"","traveler_persona":"","vibe_description":"","svg_theme":"default_train","flight_card":{"outbound_hint":"","inbound_hint":""},"route_ribbon":[""],"budget_estimate":{"daily_average_twd":"","total_local_twd":"","budget_note":""},"retention_stat_note":""},"pre_trip_prep":{"transport_passes":[{"name":"","description":"","buy_timing":""}],"advance_reservations":[{"target":"","deadline_note":"","tips":""}],"todo_checklist":[""],"shopping_list":["","",""]},"daily_itinerary":[{"day_index":1,"date":"YYYY-MM-DD","day_title":"","timeline":[{"time_slot":"上午","title":"","is_must_visit":false,"transport_tag":{"type":"步行","color_code":"#5B7B6A"},"description":""}],"stay_info":{"area_recommendation":"","hotel_vibe":""}}]}`;
+{"trip_summary":{"destination":"","theme_title":"","traveler_persona":"","vibe_description":"","svg_theme":"default_train","flight_card":{"outbound_hint":"","inbound_hint":""},"route_ribbon":[""],"budget_estimate":{"daily_average_twd":"","total_local_twd":"","budget_note":""},"retention_stat_note":""},"pre_trip_prep":{"transport_passes":[{"name":"","description":"","buy_timing":""}],"advance_reservations":[{"target":"","deadline_note":"","tips":""}],"todo_checklist":[""],"shopping_list":["","",""]},"daily_itinerary":[{"day_index":1,"date":"YYYY-MM-DD","day_title":"","timeline":[{"time_slot":"上午","time":"09:30","title":"","address":"","is_must_visit":false,"transport_tag":{"type":"步行","lutu_code":"walk","duration":"","color_code":"#5B7B6A"},"tags":[""],"description":""}],"stay_info":{"area_recommendation":"","hotel_vibe":""}}]}`;
 }
 
 /** 使用者輸入的抵達 / 離開時間視為資料，以標籤包起來，不是指令 */
@@ -337,7 +344,8 @@ async function generateTrip(req: ValidatedRequest, context: InvocationContext): 
   const dayCount = req.dates.length;
   const season = seasonHint(req.dates[0]);
   // 依天數動態調整輸出上限，避免長行程 JSON 被截斷（gpt-4.1 單次輸出上限 32,768 tokens）
-  const maxTokens = dayCount <= 5 ? 8000 : 14000;
+  // 旅圖欄位（時間、地址、標籤）讓每個景點多約 80~100 token，長天數多留一些空間
+  const maxTokens = dayCount <= 5 ? 9000 : 16000;
 
   const body = {
     messages: [

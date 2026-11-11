@@ -6,16 +6,30 @@
 export const SVG_THEMES = ['kyoto', 'tokyo', 'nature_mountain', 'ocean_beach', 'default_train'] as const;
 export type SvgTheme = (typeof SVG_THEMES)[number];
 
+/** 旅圖 Lutu 的 6 種交通代碼 */
+export const LUTU_TRANSPORT = ['walk', 'train', 'subway', 'bus', 'taxi', 'flight'] as const;
+export type LutuTransport = (typeof LUTU_TRANSPORT)[number];
+
 export interface TransportTag {
   type: string;
   color_code: string;
+  /** 選填：旅圖交通代碼（舊行程沒有） */
+  lutu_code?: LutuTransport;
+  /** 選填：從上一個景點過來的交通時間，例如「約 15 分」 */
+  duration?: string;
 }
 
 export interface TimelineItem {
   time_slot: string;
+  /** 選填：24 小時制 HH:MM（舊行程沒有，前端匯出旅圖時依時段推算） */
+  time?: string;
   title: string;
+  /** 選填：當地語言地址 */
+  address?: string;
   is_must_visit: boolean;
   transport_tag: TransportTag;
+  /** 選填：最多 4 個、每個 6 字內的景點標籤 */
+  tags?: string[];
   description: string;
 }
 
@@ -74,6 +88,7 @@ export const MAX_TRIP_DAYS = 14;
 export class TripValidationError extends Error {}
 
 const HEX_COLOR_RE = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
+const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 function isObj(v: unknown): v is Record<string, unknown> {
@@ -174,14 +189,25 @@ export function sanitizeTrip(input: unknown, opts: SanitizeOptions = {}): TripPl
         const item = isObj(t) ? t : {};
         const tag = isObj(item.transport_tag) ? item.transport_tag : {};
         const color = str(tag.color_code, 7);
+        // 旅圖用的選填欄位：格式不對就整個省略，不讓整份行程失敗
+        const time = str(item.time, 5);
+        const address = str(item.address, 120);
+        const lutu = str(tag.lutu_code, 10).toLowerCase();
+        const duration = str(tag.duration, 12);
+        const tags = arr(item.tags, 8).map((x) => str(x, 12)).filter((x) => x && [...x].length <= 6).slice(0, 4);
         return {
           time_slot: str(item.time_slot, 10, '行程'),
+          ...(TIME_RE.test(time) ? { time } : {}),
           title: str(item.title, 120, '自由散策'),
+          ...(address ? { address } : {}),
           is_must_visit: item.is_must_visit === true,
           transport_tag: {
             type: str(tag.type, 20, '移動'),
-            color_code: HEX_COLOR_RE.test(color) ? color : '#5B7B6A'
+            color_code: HEX_COLOR_RE.test(color) ? color : '#5B7B6A',
+            ...((LUTU_TRANSPORT as readonly string[]).includes(lutu) ? { lutu_code: lutu as LutuTransport } : {}),
+            ...(duration ? { duration } : {})
           },
+          ...(tags.length ? { tags } : {}),
           description: str(item.description, 600)
         };
       }),
