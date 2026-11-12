@@ -41,18 +41,20 @@ import {
  *
  * 雙水池（每日 00:00 台灣時間重置）：
  *   免費席 50：首次免費試用者只能用這一池
- *   序號保留席 30：持序號者先用免費席，免費席滿了才動用保留席（序號者每日最多可兌換 80 席）
+ *   序號保留席 60：持序號者先用免費席，免費席滿了才動用保留席（序號者每日最多可兌換 110 席）
  *   管理員：不受限，只累計 vip_whitelist_used
  *
  * 回應碼：
  *   200 成功        { data, entitlement, code_preserved, free_quota_preserved, remainingUses?（= code_remaining_uses）, codeKind?, ...雙水池名額 }
+ *                   終身買斷碼另回傳 isLifetimeVip: true、dailyRemaining（今日剩餘）、dailyLimit（10）、lifetimeOwner（是否買家本人），不回傳 remainingUses
  *                   活動公用碼（AllowSameEmail = false 且無 OwnerEmail）回傳 codeKind: 'public'，不回傳 remainingUses
  *   401 管理員金鑰錯誤 { error: 'invalid_admin_token' }
  *   400 輸入錯誤    { error: 'invalid_input' | 'invalid_code' | 'invalid_otp' | 'otp_expired' | 'otp_locked' | 'otp_missing', message }
  *   402 需要贊助    { error: 'payment_required', message, portaly_url }
  *   402 序號不可用  { error: 'code_unavailable', reason: 'not_found' | 'exhausted', message }
  *   403 需驗證信箱  { status: 'otp_required', error: 'otp_required', message }
- *   403 信箱已用過  { error: 'code_email_used', reason: 'companion_used' | 'email_used', message }   旅伴 / 活動公用碼每個信箱限 1 次（未扣額度）
+ *   403 信箱已用過  { error: 'code_email_used', reason: 'companion_used' | 'email_used' | 'owner_only' | 'group_full', message }   旅伴 / 活動公用碼每個信箱限 1 次（未扣額度）
+ *   429 買斷今日用完 { error: 'code_daily_limit', message }   終身買斷碼每日 10 次，台灣時間 00:00 補滿
  *   409 處理中      { error: 'code_processing' | 'entitlement_busy', message }
  *   429 今日額滿    { error: 'free_pool_full' | 'token_limit_reached', message }
  *   502/504 AI 失敗 { error: 'generation_failed' | 'generation_timeout', message }
@@ -456,7 +458,10 @@ function codeErrorResponse(request: HttpRequest, problem: CodeProblem): HttpResp
   if (problem === 'processing') {
     return json(request, 409, { error: 'code_processing', message: CODE_MESSAGES.processing });
   }
-  if (problem === 'companion_used' || problem === 'email_used') {
+  if (problem === 'daily_limit') {
+    return json(request, 429, { error: 'code_daily_limit', reason: problem, message: CODE_MESSAGES[problem] });
+  }
+  if (problem === 'companion_used' || problem === 'email_used' || problem === 'owner_only' || problem === 'group_full') {
     return json(request, 403, { error: 'code_email_used', reason: problem, message: CODE_MESSAGES[problem] });
   }
   return json(request, 402, { error: 'code_unavailable', reason: problem, message: CODE_MESSAGES[problem] });
@@ -547,6 +552,7 @@ async function handlePost(request: HttpRequest, context: InvocationContext): Pro
   let codePreserved = false;
   let freeQuotaPreserved = false;
   let publicCode = false;
+  let lifetime: { dailyLimit: number; isOwner: boolean } | null = null;
 
   if (req.otpCode && freeAvailable && (rem.free_remaining > 0 || !req.redeemCode)) {
     if (rem.free_remaining === 0) return poolFullResponse(request, 'free', rem);
@@ -559,7 +565,8 @@ async function handlePost(request: HttpRequest, context: InvocationContext): Pro
     if (check.status !== 'ok') return codeErrorResponse(request, check.status);
     if (rem.code_total_remaining === 0) return poolFullResponse(request, 'code', rem);
     // 活動公用碼（每信箱限 1 次、沒有買家）：不對外透露公用池剩餘次數
-    publicCode = !check.view.allowSameEmail && !check.view.ownerEmail;
+    publicCode = !check.view.isLifetime && !check.view.allowSameEmail && !check.view.ownerEmail;
+    if (check.view.isLifetime) lifetime = { dailyLimit: check.view.dailyLimit, isOwner: check.isOwner };
     entitlement = 'redeem_code';
     freeQuotaPreserved = freeAvailable;
   } else if (!freeAvailable) {
@@ -655,7 +662,11 @@ async function handlePost(request: HttpRequest, context: InvocationContext): Pro
     code_preserved: codePreserved,
     free_quota_preserved: freeQuotaPreserved,
     ...(publicCode ? { codeKind: 'public' } : {}),
-    ...(codeRemainingUses !== undefined && !publicCode ? { remainingUses: codeRemainingUses, code_remaining_uses: codeRemainingUses } : {}),
+    ...(lifetime && codeRemainingUses !== undefined
+      ? { isLifetimeVip: true, dailyRemaining: codeRemainingUses, dailyLimit: lifetime.dailyLimit, lifetimeOwner: lifetime.isOwner }
+      : codeRemainingUses !== undefined && !publicCode
+        ? { remainingUses: codeRemainingUses, code_remaining_uses: codeRemainingUses }
+        : {}),
     ...poolFields(poolRemaining(reserved.usage))
   });
 }

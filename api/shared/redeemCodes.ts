@@ -1,6 +1,6 @@
 import { randomInt, randomUUID } from 'node:crypto';
 import { TableClient } from '@azure/data-tables';
-import { CODE_PK, LEGACY_CODE_PK, TABLES, emailRowKey, getEntityOrNull, getTable, statusOf } from './storage';
+import { CODE_PK, LEGACY_CODE_PK, TABLES, emailRowKey, getEntityOrNull, getTable, statusOf, taipeiDateKey } from './storage';
 
 /**
  * RedeemCodes：多次數序號（Portaly 贊助方案 / 戰情室批次碼 / 活動公用碼）
@@ -22,6 +22,13 @@ import { CODE_PK, LEGACY_CODE_PK, TABLES, emailRowKey, getEntityOrNull, getTable
  * 成功才扣：生成前在 PendingLocks（JSON 陣列）加一把鎖，AI 成功回傳後才 RemainingUses - 1；
  * 失敗只移除自己的鎖。RemainingUses - 進行中的鎖數 > 0 才能再鎖，超過 3 分鐘的鎖視為逾時自動失效。
  * 所有寫入都帶 ETag，多人同時使用同一組序號也不會超扣。
+ *
+ * 終身買斷序號（IsLifetime = true，Portaly NT$ 90 LIFE- / NT$ 199 GROUP-）：
+ *   沒有總次數上限，每組序號每日最多 DailyLimit（10）次，台灣時間 00:00 歸零：
+ *   LastUsedDate（"YYYY-MM-DD"，UTC+8）不是今天時，DailyUsedCount 視為 0。
+ *   買家本人（OwnerEmail）終身使用；GroupMaxFriends > 0 時另可分給這麼多位旅伴信箱，每位限 1 次（記在 UsedByEmails / RedeemCodeUsers）。
+ *   TotalUsedCount 累計總使用次數（戰情室統計用）。OwnerEmail 為空的買斷碼由第一個使用的信箱認領。
+ *   同樣走 PendingLocks「成功才扣」：鎖數 + 今日已用 < DailyLimit 才能再鎖。
  *
  * 向下相容：舊欄位 max_uses / used_count / allow_same_email / used_by_emails / campaign_tag / sponsor_email 會自動換算；
  * 最早的一次性序號（只有 is_used）視為 RemainingUses = IsUsed ? 0 : 1。
@@ -59,6 +66,13 @@ export interface RedeemCodeEntity {
   UsedAt?: string;
   LastUsedByEmail?: string;
   LastDestination?: string;
+  // 終身買斷
+  IsLifetime?: boolean;
+  DailyLimit?: number;
+  GroupMaxFriends?: number;
+  LastUsedDate?: string;
+  DailyUsedCount?: number;
+  TotalUsedCount?: number;
   // 舊欄位（PartitionKey "Code"）
   max_uses?: number;
   used_count?: number;
@@ -89,8 +103,11 @@ interface PendingLock {
  *   companion_used 旅伴分享序號（有 OwnerEmail）：此信箱已體驗過 1 次
  *   email_used     活動公用碼（無 OwnerEmail）：此信箱已體驗過 1 次
  *   processing     剩餘次數都正在生成中
+ *   daily_limit    終身買斷碼：今日 10 次已用完（台灣時間 00:00 補滿）
+ *   owner_only     個人買斷碼：只有買家本人信箱可以用
+ *   group_full     旅伴買斷碼：旅伴名額（15 位）已滿
  */
-export type CodeProblem = 'not_found' | 'exhausted' | 'companion_used' | 'email_used' | 'processing';
+export type CodeProblem = 'not_found' | 'exhausted' | 'companion_used' | 'email_used' | 'processing' | 'daily_limit' | 'owner_only' | 'group_full';
 
 export interface CodeView {
   partitionKey: string;
@@ -105,6 +122,14 @@ export interface CodeView {
   planName: string;
   pending: PendingLock[];
   createdAt: string;
+  /** 累計已使用次數（一般序號 = TotalUses - RemainingUses） */
+  usedCount: number;
+  isLifetime: boolean;
+  /** 終身買斷：每日上限；一般序號為 0 */
+  dailyLimit: number;
+  /** 終身買斷：今日已用（跨日為 0） */
+  dailyUsedToday: number;
+  groupMaxFriends: number;
 }
 
 export type CodeCheck = { status: 'ok' | Exclude<CodeProblem, 'not_found'>; view: CodeView; isOwner: boolean } | { status: 'not_found' };
@@ -146,6 +171,30 @@ export function viewOf(e: RedeemCodeEntity & { partitionKey?: string; rowKey?: s
   if (!usedBy.length && e.used_by_email) usedBy.push(e.used_by_email);
   const pending = parseList<PendingLock>(e.PendingLocks ?? e.pending_locks).filter((l) => l && now - Date.parse(l.at) < CODE_LOCK_MS);
   const source = e.Source ?? e.source;
+  if (e.IsLifetime === true) {
+    // 終身買斷：remainingUses / totalUses 換算成「今日」額度，沿用一般序號的鎖與檢查流程
+    const dailyLimit = Math.max(1, Math.floor(num(e.DailyLimit) ?? 10));
+    const dailyUsedToday = e.LastUsedDate === taipeiDateKey(new Date(now)) ? Math.max(0, Math.floor(num(e.DailyUsedCount) ?? 0)) : 0;
+    return {
+      partitionKey: e.partitionKey || CODE_PK,
+      code: e.rowKey || e.Code || '',
+      ownerEmail: cleanEmail(e.OwnerEmail),
+      amount: num(e.Amount) ?? 0,
+      totalUses: dailyLimit,
+      remainingUses: Math.max(0, dailyLimit - dailyUsedToday),
+      allowSameEmail: false,
+      usedBy,
+      campaignTag: e.CampaignTag || 'PORTALY_LIFETIME',
+      planName: e.PlanName || '',
+      pending,
+      createdAt: e.CreatedAt || '',
+      usedCount: Math.max(0, Math.floor(num(e.TotalUsedCount) ?? 0)),
+      isLifetime: true,
+      dailyLimit,
+      dailyUsedToday,
+      groupMaxFriends: Math.max(0, Math.floor(num(e.GroupMaxFriends) ?? 0))
+    };
+  }
   return {
     partitionKey: e.partitionKey || CODE_PK,
     code: e.rowKey || e.Code || '',
@@ -158,11 +207,17 @@ export function viewOf(e: RedeemCodeEntity & { partitionKey?: string; rowKey?: s
     campaignTag: e.CampaignTag || e.campaign_tag || (source === 'portaly' ? 'PORTALY' : 'UNTAGGED'),
     planName: e.PlanName || '',
     pending,
-    createdAt: e.CreatedAt || e.created_at || ''
+    createdAt: e.CreatedAt || e.created_at || '',
+    usedCount: Math.max(0, totalUses - Math.max(0, Math.min(totalUses, Math.floor(remaining)))),
+    isLifetime: false,
+    dailyLimit: 0,
+    dailyUsedToday: 0,
+    groupMaxFriends: 0
   };
 }
 
 function isOwnerOf(v: CodeView, email: string): boolean {
+  if (v.isLifetime && !v.ownerEmail) return !!email; // 沒有買家信箱的買斷碼：第一個使用的信箱認領
   return !!email && !!v.ownerEmail && email === v.ownerEmail;
 }
 
@@ -180,6 +235,7 @@ async function hasUsedCode(v: CodeView, email: string): Promise<boolean> {
 
 /** 呼叫 AI 之前的權限檢查（email 已轉小寫；空字串代表只查剩餘次數；usedBefore 由 hasUsedCode 查得） */
 function checkView(v: CodeView, email: string, usedBefore = false): CodeCheck['status'] {
+  if (v.isLifetime) return checkLifetime(v, email, usedBefore);
   if (v.remainingUses <= 0) return 'exhausted';
   if (needsEmailCheck(v, email)) {
     if (usedBefore) return v.ownerEmail ? 'companion_used' : 'email_used';
@@ -189,7 +245,25 @@ function checkView(v: CodeView, email: string, usedBefore = false): CodeCheck['s
   return 'ok';
 }
 
-function statusFor(remaining: number, pending: PendingLock[]): CodeStatus {
+/**
+ * 終身買斷：旅伴先查信箱權限（個人版拒絕、旅伴版每信箱 1 次、最多 GroupMaxFriends 位），
+ * 再查整組序號今日額度；買家本人只看今日額度。先查權限是為了讓旅伴看到正確原因，而不是「今日額度已用完」。
+ */
+function checkLifetime(v: CodeView, email: string, usedBefore: boolean): CodeCheck['status'] {
+  if (email && !isOwnerOf(v, email)) {
+    if (v.groupMaxFriends <= 0) return 'owner_only';
+    if (usedBefore) return 'companion_used';
+    const friends = new Set([...v.usedBy, ...v.pending.map((l) => l.email).filter((m) => m && m !== v.ownerEmail)]);
+    if (!friends.has(email) && friends.size >= v.groupMaxFriends) return 'group_full';
+  }
+  if (v.remainingUses <= 0) return 'daily_limit';
+  if (email && v.pending.some((l) => l.email === email) && !isOwnerOf(v, email)) return 'processing';
+  if (v.remainingUses - v.pending.length <= 0) return 'processing';
+  return 'ok';
+}
+
+function statusFor(remaining: number, pending: PendingLock[], lifetime = false): CodeStatus {
+  if (lifetime) return pending.length ? 'processing' : 'unused';
   if (remaining <= 0) return 'exhausted';
   return pending.length ? 'processing' : 'unused';
 }
@@ -268,6 +342,34 @@ export async function markCodeUsed(code: string, lockId: string, email: string, 
     const remaining = Math.max(0, v.remainingUses - 1);
     const appended = isOwnerOf(v, mail) || v.usedBy.includes(mail) ? v.usedBy : [...v.usedBy, mail];
     const usedBy = JSON.stringify(appended).length <= USED_BY_MAX_CHARS ? appended : v.usedBy;
+    if (v.isLifetime) {
+      // 終身買斷：只動今日次數與累計次數，沒有 RemainingUses / IsUsed
+      try {
+        await table.updateEntity(
+          {
+            partitionKey: e.partitionKey,
+            rowKey: code,
+            OwnerEmail: v.ownerEmail || mail,
+            LastUsedDate: taipeiDateKey(),
+            DailyUsedCount: v.dailyUsedToday + 1,
+            TotalUsedCount: v.usedCount + 1,
+            UsedByEmails: JSON.stringify(usedBy),
+            Status: statusFor(remaining, pending, true),
+            PendingLocks: JSON.stringify(pending),
+            LockedAt: pending.length ? e.LockedAt ?? '' : '',
+            UsedAt: new Date().toISOString(),
+            LastUsedByEmail: mail,
+            LastDestination: destination
+          },
+          'Merge',
+          { etag: e.etag }
+        );
+        return remaining;
+      } catch (err) {
+        if (statusOf(err) === 412) continue;
+        throw err;
+      }
+    }
     try {
       await table.updateEntity(
         {
@@ -315,7 +417,7 @@ export async function unlockCode(code: string, lockId: string): Promise<void> {
           partitionKey: e.partitionKey,
           rowKey: code,
           PendingLocks: JSON.stringify(pending),
-          Status: statusFor(v.remainingUses, pending),
+          Status: statusFor(v.remainingUses, pending, v.isLifetime),
           LockedAt: pending.length ? e.LockedAt ?? '' : ''
         },
         'Merge',
@@ -334,7 +436,10 @@ export const CODE_MESSAGES: Record<CodeProblem, string> = {
   exhausted: '🌿 此序號額度已全數使用完畢或序號無效。',
   companion_used: '🌿 這組旅伴分享序號您已經體驗過 1 次囉！若想繼續微調行程，歡迎贊助屬於自己的慢旅序號 ☕（本次未扣除額度）。',
   email_used: '🌿 這組活動限量 VIP 序號每個信箱限體驗 1 次喔！若喜歡 SlowMate，歡迎贊助解鎖更多專屬額度 ☕（本次未扣除額度）。',
-  processing: '此序號正在生成行程中，請稍候 1~2 分鐘再試（若超過 3 分鐘仍未完成會自動釋放）。'
+  processing: '此序號正在生成行程中，請稍候 1~2 分鐘再試（若超過 3 分鐘仍未完成會自動釋放）。',
+  daily_limit: '🌿 您今日的 10 次終身 VIP 規劃額度已用完囉！今晚 00:00 將自動為您補滿 10 次額度，明日請早 ☕',
+  owner_only: '🌿 這組「個人終身買斷」序號僅限買家本人信箱使用喔！想和旅伴一起排行程，歡迎選擇 NT$ 199 旅伴親友團買斷版 ☕（本次未扣除額度）。',
+  group_full: '🌿 這組旅伴親友團序號的 15 位旅伴名額已全數用完囉！喜歡 SlowMate 的話，歡迎贊助屬於自己的終身買斷通行證 ☕（本次未扣除額度）。'
 };
 
 /* ------------------------------------------------------------------ */
@@ -378,6 +483,8 @@ export interface NewCodeOptions {
   ownerEmail?: string;
   amount?: number;
   planName?: string;
+  /** 終身買斷：每日上限與旅伴名額（沒有總次數上限） */
+  lifetime?: { dailyLimit: number; groupMaxFriends: number };
   extra?: Partial<RedeemCodeEntity>;
 }
 
@@ -406,7 +513,17 @@ function newCodeEntity(code: string, opts: NewCodeOptions) {
     LockedAt: '',
     Source: opts.source,
     CreatedAt: new Date().toISOString(),
-    UsedAt: ''
+    UsedAt: '',
+    ...(opts.lifetime
+      ? {
+          IsLifetime: true,
+          DailyLimit: opts.lifetime.dailyLimit,
+          GroupMaxFriends: opts.lifetime.groupMaxFriends,
+          LastUsedDate: '',
+          DailyUsedCount: 0,
+          TotalUsedCount: 0
+        }
+      : { IsLifetime: false })
   };
 }
 

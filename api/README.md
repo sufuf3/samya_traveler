@@ -50,7 +50,7 @@ Email 當 RowKey 時只會轉義 Table Storage 不允許的字元（`/ \ # ?`、
 ```
 
 - 免費席（`FREE_DAILY_LIMIT`，未設定時沿用 `DAILY_GLOBAL_LIMIT`，預設 50）：首次免費試用者只能用這一池。
-- 序號保留席（`VIP_POOL_LIMIT`，預設 30）：持序號者先用免費席，免費席滿了才動用保留席，所以序號者每日最多可兌換 80 席。
+- 序號保留席（`VIP_POOL_LIMIT`，預設 60）：持序號者先用免費席，免費席滿了才動用保留席，所以序號者每日最多可兌換 110 席。
 - 預扣時記下實際扣到的欄位；AI 生成失敗時只把那一席還回去，序號 `used_count` 與免費資格都不動（零損耗）。
 
 ### 贊助方案與多次數序號
@@ -59,15 +59,22 @@ Email 當 RowKey 時只會轉義 Table Storage 不允許的字元（`/ \ # ?`、
 
 | 模式 | 金額 | 方案 | 前綴 | `TotalUses` | `AllowSameEmail` | `CampaignTag` |
 |---|---|---|---|---|---|---|
-| `NORMAL`（預設） | ≥ 299 | 🍱 慢旅玩家同樂包 | `SM10-` | 10 | `false` | `PORTALY_NORMAL` |
-| | ≥ 99 | 🌿 單趟旅程微調包 | `SM3-` | 3 | `true` | `PORTALY_NORMAL` |
-| | 其他（含 69、無法解析） | ☕ 單次試調體驗 | `SM1-` | 1 | `true` | `PORTALY_NORMAL` |
+| `NORMAL`（預設） | ≥ 199 | 🍱 旅伴親友團買斷版（終身） | `GROUP-` | 每日 10 次 | 買家 + 15 位旅伴各 1 次 | `PORTALY_LIFETIME` |
+| | 其他（含 90、無法解析） | ☕ 個人終身買斷版 | `LIFE-` | 每日 10 次 | 僅買家本人 | `PORTALY_LIFETIME` |
 | `XMAS` | ≥ 488 | 🎅 2027 全年慢旅年票 | `XMAS14-` | 14 | `false` | `PORTALY_XMAS` |
 | | ≥ 300 | 🦌 聖誕旅伴加碼包 | `XMAS7-` | 7 | `false` | `PORTALY_XMAS` |
 | | ≥ 199 | 🎄 聖誕雙人福袋 | `XMAS3-` | 3 | `true` | `PORTALY_XMAS` |
 | | 其他 | ☕ 單次試調體驗 | `SM1-` | 1 | `true` | `PORTALY_NORMAL` |
 
-`AllowSameEmail`：
+終身買斷序號（`IsLifetime = true`）：
+
+- 沒有總次數上限、終身有效；每組序號每日最多 `DailyLimit`（10）次，台灣時間 00:00 歸零（`LastUsedDate` 不是今天時 `DailyUsedCount` 視為 0）。買家與旅伴的使用都算進當日次數。
+- `GroupMaxFriends = 0`（LIFE-）：只有 `OwnerEmail` 能用，其他信箱回 403 `owner_only`。
+- `GroupMaxFriends = 15`（GROUP-）：另可分給 15 位不同信箱的旅伴，每位 1 次（記在 `UsedByEmails` / `RedeemCodeUsers`），第 16 位回 403 `group_full`。
+- 今日用完回 429 `code_daily_limit`；成功回傳 `isLifetimeVip`、`dailyRemaining`、`dailyLimit`、`lifetimeOwner`。`TotalUsedCount` 累計總次數供戰情室統計。
+- 舊的 SM1 / SM3 / SM5 / SM10 與戰情室活動碼照舊依 `RemainingUses` 扣減。
+
+`AllowSameEmail`（次數制序號）：
 
 - `true`：不限信箱，誰都可以用到次數用完（69 單次碼、99 三次微調包、聖誕雙人福袋、`GIFT10-`、`EARLY1-` 等）。
 - `false` 且有 `OwnerEmail`（299 同樂包；舊的 300 / 488 方案序號照舊有效）：買家本人可重複使用到次數歸零；其他旅伴信箱每個限用 1 次（記在 `UsedByEmails`）。
@@ -182,7 +189,7 @@ OTP 只有在行程「成功生成」後才作廢；AI 生成失敗時，10 分�
 | 變數 | 預設值 |
 |---|---|
 | `FREE_DAILY_LIMIT`（舊名 `DAILY_GLOBAL_LIMIT`） | 50（每日免費席） |
-| `VIP_POOL_LIMIT` | 30（每日序號保留席） |
+| `VIP_POOL_LIMIT` | 60（每日序號保留席） |
 | `SURVEY_URL` | `https://forms.gle/WeFcWEu2NrPP8AWy8`（行程信「雙人慢旅共享禮」問卷連結） |
 | `PROMO_MODE` | `NORMAL`（常態 69 / 99 / 299）；`XMAS` 開啟聖誕囤票祭（199 / 300 / 488） |
 | `EMAIL_DAILY_CAP` | 400 |

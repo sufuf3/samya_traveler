@@ -114,6 +114,21 @@ export interface CodeEmailInput {
   allowSameEmail: boolean;
   /** 聖誕囤票祭：信件底部加上「曬行程抽年票」活動提示 */
   xmas?: boolean;
+  /** 終身買斷：每日上限與可分享旅伴人數（改寄「永久解鎖」開通信） */
+  lifetime?: { dailyLimit: number; groupMaxFriends: number };
+}
+
+/** 終身買斷的使用說明 */
+function lifetimeUsageLines(life: { dailyLimit: number; groupMaxFriends: number }, ownerEmail = ''): string[] {
+  const owner = `<strong>買家本人信箱${ownerEmail ? `（${escapeHtml(ownerEmail)}）` : ''}</strong>`;
+  return [
+    `${owner}終身享有 <strong>每日 ${life.dailyLimit} 次 AI 深度規劃額度</strong>（台灣時間每日 00:00 自動補滿重置），沒有總次數上限、沒有使用期限。`,
+    '同時享有 <strong>每日 60 席 VIP 優先通道</strong>，熱門時段免排隊、免收信箱驗證碼。',
+    life.groupMaxFriends > 0
+      ? `可以把序號丟進 LINE 群組分給旅伴：最多 <strong>${life.groupMaxFriends} 位不同信箱的旅伴</strong>各可免費體驗 1 次。`
+      : '這是個人版序號，僅限買家本人信箱使用。',
+    '只有在行程「成功生成」後才會計入當日次數；生成失敗或名額已滿都不會扣。'
+  ];
 }
 
 /** 共享規則說明（HTML 與純文字共用；<strong> 在純文字中會被移除） */
@@ -137,7 +152,9 @@ const XMAS_GIVEAWAY_HTML =
 export function renderCodeEmail(input: CodeEmailInput): { subject: string; html: string; text: string } {
   const total = Math.max(1, input.totalUses || 1);
   const name = input.sponsorName ? `${input.sponsorName}，` : '';
-  const usage = codeUsageLines(total, input.allowSameEmail, input.ownerEmail);
+  const life = input.lifetime;
+  const usage = life ? lifetimeUsageLines(life, input.ownerEmail) : codeUsageLines(total, input.allowSameEmail, input.ownerEmail);
+  const quotaLine = life ? `每日 ${life.dailyLimit} 次（每日 00:00 自動補滿・終身有效）` : `${total} 次`;
   const html = `<!DOCTYPE html>
 <html lang="zh-TW"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
 <body style="margin:0;padding:0;background:#FBF9F5;font-family:'Noto Sans TC',-apple-system,BlinkMacSystemFont,'PingFang TC','Microsoft JhengHei',sans-serif;">
@@ -147,11 +164,11 @@ export function renderCodeEmail(input: CodeEmailInput): { subject: string; html:
         <tr><td style="padding:28px 24px;color:#2C3531;">
           <div style="font-family:'Noto Serif TC',Georgia,serif;font-size:14px;letter-spacing:2px;color:#435E4F;font-weight:700;">${escapeHtml(BRAND_NAME)}</div>
           <h1 style="font-family:'Noto Serif TC',Georgia,serif;font-size:21px;margin:12px 0;">☕ ${escapeHtml(name)}謝謝你的隨喜贊助！</h1>
-          <p style="font-size:14px;line-height:1.8;color:#6E7873;margin:0 0 16px;">你的支持讓 SlowMate 能繼續陪伴更多旅人慢慢走。以下是你的專屬解鎖序號：</p>
+          <p style="font-size:14px;line-height:1.8;color:#6E7873;margin:0 0 16px;">${life ? '你的終身買斷通行證已開通！往後每一趟旅行，都可以用這組序號慢慢排。以下是你的專屬通行證序號：' : '你的支持讓 SlowMate 能繼續陪伴更多旅人慢慢走。以下是你的專屬解鎖序號：'}</p>
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#FFF6E9;border:1px solid #F2D7A9;border-radius:14px;margin-bottom:12px;">
             <tr><td style="padding:12px 16px;font-size:14px;line-height:1.8;color:#2C3531;">
               <div>購買方案：<strong>【${escapeHtml(input.planName)}】</strong></div>
-              <div>總可用次數：<strong>${total} 次</strong></div>
+              <div>${life ? '規劃額度' : '總可用次數'}：<strong>${escapeHtml(quotaLine)}</strong></div>
             </td></tr>
           </table>
           <div style="text-align:center;background:#E6EFEA;border:1px dashed #5B7B6A;border-radius:14px;padding:18px 10px;font-family:'SFMono-Regular',Consolas,monospace;font-size:24px;font-weight:700;letter-spacing:3px;color:#435E4F;">${escapeHtml(input.code)}</div>
@@ -171,7 +188,7 @@ export function renderCodeEmail(input: CodeEmailInput): { subject: string; html:
   const text = `${name}謝謝你的隨喜贊助！
 
 購買方案：【${input.planName}】
-總可用次數：${total} 次
+${life ? '規劃額度' : '總可用次數'}：${quotaLine}
 你的解鎖序號：${input.code}
 
 一鍵帶入序號：${input.magicLink}
@@ -180,6 +197,6 @@ ${usage.map((l) => `• ${strip(l)}`).join('\n')}
 ${input.xmas ? `\n${strip(XMAS_GIVEAWAY_HTML)}\n` : ''}
 有任何問題歡迎私訊 IG @samya_traveler
 — ${BRAND_NAME} · https://samya-traveler.github.io/slowmate/`;
-  const subject = `☕ 你的【${input.planName}】解鎖序號（${total} 次額度）｜${BRAND_NAME}`;
+  const subject = life ? '【SlowMate 永久解鎖】您的終身買斷通行證已開通 🌿' : `☕ 你的【${input.planName}】解鎖序號（${total} 次額度）｜${BRAND_NAME}`;
   return { subject, html, text };
 }

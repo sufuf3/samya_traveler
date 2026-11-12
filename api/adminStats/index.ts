@@ -96,14 +96,14 @@ async function handleGet(request: HttpRequest): Promise<HttpResponseInit> {
 
   // 序號：各活動核銷統計 + 排行榜（新舊 PartitionKey 都列）
   const campaigns = new Map<string, CampaignStat>();
-  const codes: { code: string; campaign_tag: string; used_count: number; max_uses: number; remaining_uses: number; allow_same_email: boolean; owner: boolean; status: string; created_at: string }[] = [];
+  const codes: { code: string; campaign_tag: string; used_count: number; max_uses: number; remaining_uses: number; allow_same_email: boolean; owner: boolean; status: string; created_at: string; is_lifetime?: boolean; daily_limit?: number; group_max_friends?: number }[] = [];
   for await (const v of listAllCodes()) {
-    const used = v.totalUses - v.remainingUses;
+    const used = v.usedCount;
     const stat = campaigns.get(v.campaignTag) ?? { campaign_tag: v.campaignTag, codes: 0, capacity: 0, used: 0, exhausted: 0 };
     stat.codes++;
-    stat.capacity += v.totalUses;
+    stat.capacity += v.isLifetime ? 0 : v.totalUses; // 買斷碼沒有總次數上限
     stat.used += used;
-    if (v.remainingUses <= 0) stat.exhausted++;
+    if (!v.isLifetime && v.remainingUses <= 0) stat.exhausted++;
     campaigns.set(v.campaignTag, stat);
     codes.push({
       code: v.code,
@@ -113,7 +113,8 @@ async function handleGet(request: HttpRequest): Promise<HttpResponseInit> {
       remaining_uses: v.remainingUses,
       allow_same_email: v.allowSameEmail,
       owner: !!v.ownerEmail,
-      status: v.remainingUses <= 0 ? 'exhausted' : v.pending.length ? 'processing' : 'unused',
+      status: v.isLifetime ? (v.pending.length ? 'processing' : 'lifetime') : v.remainingUses <= 0 ? 'exhausted' : v.pending.length ? 'processing' : 'unused',
+      ...(v.isLifetime ? { is_lifetime: true, daily_limit: v.dailyLimit, group_max_friends: v.groupMaxFriends } : {}),
       created_at: v.createdAt
     });
   }

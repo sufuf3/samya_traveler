@@ -204,7 +204,7 @@ interface DailyPoolEntity extends Partial<PoolUsage> {
 }
 
 export function poolLimits(): { free: number; vip: number } {
-  return { free: envInt('FREE_DAILY_LIMIT', envInt('DAILY_GLOBAL_LIMIT', 50)), vip: envInt('VIP_POOL_LIMIT', 30) };
+  return { free: envInt('FREE_DAILY_LIMIT', envInt('DAILY_GLOBAL_LIMIT', 50)), vip: envInt('VIP_POOL_LIMIT', 60) };
 }
 
 function usageOf(e: DailyPoolEntity | null): PoolUsage {

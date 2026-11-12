@@ -19,7 +19,7 @@
     "EMAIL_DAILY_CAP": "400",
 
     "DAILY_GLOBAL_LIMIT": "50",
-    "VIP_POOL_LIMIT": "30",
+    "VIP_POOL_LIMIT": "60",
     "ADMIN_SECRET": "<64-char-random-hex; openssl rand -hex 32>",
     "PORTALY_URL": "https://portaly.cc/samya_traveler",
     "ALLOWED_ORIGINS": "https://samya-traveler.github.io,http://localhost:1313,http://127.0.0.1:5500",

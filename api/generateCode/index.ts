@@ -21,7 +21,7 @@ import { CODE_PK, TABLES, getTable } from '../shared/storage';
  * ── 模式 A：Portaly 贊助自動發碼（Google Apps Script / Logic App 呼叫）───────────────
  *   Body：{ email（或 sponsor_email）, amount, order_id?, sponsor_name?, notify? }
  *   依金額與 App Setting PROMO_MODE（NORMAL / XMAS）決定方案（見 shared/plans.ts）：
- *     NORMAL：>= 299 SM10-（10 次，旅伴每信箱 1 次）、>= 99 SM3-（3 次，不限信箱）、其他 SM1-（1 次）
+ *     NORMAL：>= 199 GROUP-（旅伴親友團終身買斷：買家每日 10 次 + 15 位旅伴各 1 次）、其他 LIFE-（個人終身買斷：買家每日 10 次）
  *     XMAS  ：>= 488 XMAS14-（14 次）、>= 300 XMAS7-（7 次）、>= 199 XMAS3-（3 次）、其他 SM1-（1 次）
  *   寫入 RedeemCodes 後以 Gmail 寄出序號信（方案名稱、總次數、共享規則、一鍵帶入連結 ?code=…&email=…）。
  *   認證（擇一）：?code= / x-functions-key / x-slowmate-secret 等於 GENERATE_CODE_SECRET、GENERATE_CODE_FUNCTION_KEY 或 ADMIN_SECRET。
@@ -112,7 +112,7 @@ async function handlePortaly(request: HttpRequest, context: InvocationContext, b
   const notify = body.notify !== false && body.notify !== 'false';
   const mode = promoMode();
   const plan = planForAmount(amount, mode);
-  if (amount < 69) context.warn(`[generateCode] 贊助金額無法解析或低於 69：${amount}（仍照常發 1 次碼）`);
+  if (amount < 90) context.warn(`[generateCode] 贊助金額無法解析或低於 90：${amount}（仍照常發碼：${plan.prefix}）`);
 
   // 冪等：只有「相同且非空的 order_id」才回傳同一組序號
   if (orderId) {
@@ -143,6 +143,7 @@ async function handlePortaly(request: HttpRequest, context: InvocationContext, b
     ownerEmail,
     amount,
     planName: plan.name,
+    ...(plan.lifetime ? { lifetime: plan.lifetime } : {}),
     extra: { SponsorName: sponsorName, Currency: currency, OrderId: orderId, EmailSent: false }
   });
   const link = magicLink(code, ownerEmail);
@@ -160,6 +161,7 @@ async function handlePortaly(request: HttpRequest, context: InvocationContext, b
         planName: plan.name,
         totalUses: plan.totalUses,
         allowSameEmail: plan.allowSameEmail,
+        ...(plan.lifetime ? { lifetime: plan.lifetime } : {}),
         xmas: mode === 'XMAS'
       });
       await sendMail({ to: ownerEmail, subject: mail.subject, html: mail.html, text: mail.text });
@@ -178,8 +180,9 @@ async function handlePortaly(request: HttpRequest, context: InvocationContext, b
     code,
     magic_link: link,
     plan_name: plan.name,
-    total_uses: plan.totalUses,
-    allow_same_email: plan.allowSameEmail,
+    ...(plan.lifetime
+      ? { is_lifetime: true, daily_limit: plan.lifetime.dailyLimit, group_max_friends: plan.lifetime.groupMaxFriends }
+      : { total_uses: plan.totalUses, allow_same_email: plan.allowSameEmail }),
     campaign_tag: plan.campaignTag,
     promo_mode: mode,
     amount,

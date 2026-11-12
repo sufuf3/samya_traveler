@@ -8,12 +8,18 @@ import { CODE_MESSAGES, CODE_RE, CodeView, cleanCode, cleanEmail, inspectCode } 
  * 唯讀檢查序號狀態，供前端「🔑 我有贊助解鎖序號 → 驗證」按鈕與 Magic Link 帶入後使用。
  * 只查詢、不鎖定也不扣次數；真正核銷在 /api/plan 行程生成成功後才發生。
  * 帶 email 時一併檢查信箱權限（買家本人可重複使用；旅伴 / 活動公用碼每個信箱限 1 次）。
- *   200 { status: 'valid' | 'processing' | 'exhausted' | 'companion_used' | 'email_used' | 'not_found', message,
- *         remaining_uses?, total_uses?, is_owner?, allow_same_email?, plan_name? }
+ *   200 { status: 'valid' | 'processing' | 'exhausted' | 'companion_used' | 'email_used' | 'daily_limit' | 'owner_only' | 'group_full' | 'not_found',
+ *         message, remaining_uses?, total_uses?, is_owner?, allow_same_email?, plan_name?,
+ *         is_lifetime?, daily_remaining?, daily_limit? }   終身買斷碼回傳今日剩餘次數
  *   400 { error: 'invalid_code' }   格式不符
  */
 
 function validMessage(v: CodeView, isOwner: boolean): string {
+  if (v.isLifetime) {
+    return isOwner
+      ? `✅ 終身買斷 VIP 通行證有效！今日剩餘 ${v.remainingUses} / ${v.dailyLimit} 次（每日 00:00 自動補滿），填好表單即可開始規劃。`
+      : '✅ 旅伴親友團序號有效！你的信箱可免費體驗 1 次，填好表單即可開始規劃。';
+  }
   const left = `剩餘 ${v.remainingUses} 次`;
   if (v.allowSameEmail) return `✅ 序號有效！此序號${left}規劃額度，填好表單即可開始規劃（免收驗證碼）。`;
   if (isOwner) return `✅ 歡迎回來！你是這組序號的買家本人，可重複使用${left}額度。`;
@@ -38,8 +44,14 @@ export async function checkCode(request: HttpRequest, context: InvocationContext
       return json(request, 200, { status: 'not_found', code, message: CODE_MESSAGES.not_found });
     }
     const v = check.view;
-    const isPublic = !v.allowSameEmail && !v.ownerEmail;
-    const info = {
+    const isPublic = !v.isLifetime && !v.allowSameEmail && !v.ownerEmail;
+    const info = v.isLifetime ? {
+      is_lifetime: true,
+      daily_remaining: v.remainingUses,
+      daily_limit: v.dailyLimit,
+      is_owner: check.isOwner,
+      ...(v.planName ? { plan_name: v.planName } : {})
+    } : {
       // 活動公用碼不透露公用池剩餘次數
       ...(isPublic ? { code_kind: 'public' } : { remaining_uses: v.remainingUses, total_uses: v.totalUses }),
       allow_same_email: v.allowSameEmail,
